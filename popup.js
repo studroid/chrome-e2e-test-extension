@@ -85,7 +85,15 @@ class E2ETestRecorder {
         throw new Error('No active tab found');
       }
 
-      this.showNotification('Tab found, setting up recording...', 'info');
+      this.showNotification('Checking page connection...', 'info');
+
+      // Pre-check content script connection
+      try {
+        await this.ensureContentScriptInjected(tab.id);
+        this.showNotification('Page connection verified, setting up recording...', 'info');
+      } catch (connectionError) {
+        throw new Error('Could not establish connection to page. Please refresh the page and try again.');
+      }
 
       // Set recording state FIRST
       this.isRecording = true;
@@ -116,10 +124,27 @@ class E2ETestRecorder {
           action: 'startRecording',
           testName
         });
-        this.showNotification('Content script started successfully!', 'success');
+        this.showNotification('Recording started successfully!', 'success');
       } catch (contentError) {
-        this.showNotification('Content script failed, but recording state is active', 'info');
         console.error('Content script failed:', contentError);
+
+        if (contentError.message.includes('Please refresh the page')) {
+          this.showNotification('Please refresh the page and try again', 'error');
+          this.isRecording = false;
+          this.currentTest = null;
+          await chrome.storage.local.remove(['recordingState']);
+          this.updateUI();
+          return;
+        } else if (contentError.message.includes('Extension pages are not supported')) {
+          this.showNotification('Cannot record on extension pages', 'error');
+          this.isRecording = false;
+          this.currentTest = null;
+          await chrome.storage.local.remove(['recordingState']);
+          this.updateUI();
+          return;
+        } else {
+          this.showNotification('Recording started but content script connection unstable', 'warning');
+        }
       }
 
       this.showNotification(`Recording started: ${testName}`, 'success');
@@ -268,6 +293,7 @@ class E2ETestRecorder {
       transition: all 0.3s ease;
       ${type === 'success' ? 'background: #10b981; color: white;' :
         type === 'error' ? 'background: #ef4444; color: white;' :
+        type === 'warning' ? 'background: #f59e0b; color: white;' :
         'background: #3b82f6; color: white;'}
     `;
     notification.textContent = message;
@@ -604,18 +630,92 @@ class E2ETestRecorder {
         throw new Error('Extension pages are not supported');
       }
 
-      // Add timeout to message sending
-      const messagePromise = chrome.tabs.sendMessage(tab.id, message);
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Message timeout')), timeout);
-      });
+      try {
+        // First attempt to send message
+        const messagePromise = chrome.tabs.sendMessage(tab.id, message);
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Message timeout')), timeout);
+        });
 
-      const result = await Promise.race([messagePromise, timeoutPromise]);
-      console.log('Message result:', result);
-      return result;
+        const result = await Promise.race([messagePromise, timeoutPromise]);
+        console.log('Message result:', result);
+        return result;
+      } catch (error) {
+        if (error.message.includes('Could not establish connection') ||
+            error.message.includes('Receiving end does not exist') ||
+            error.message.includes('connection was closed')) {
+
+          console.log('Content script connection failed, attempting re-injection...');
+          this.showNotification('Reconnecting to page...', 'info');
+
+          // Try to re-inject content script
+          await this.ensureContentScriptInjected(tab.id);
+
+          // Wait for injection to complete
+          await this.delay(1000);
+
+          // Retry the message with shorter timeout
+          try {
+            const retryPromise = chrome.tabs.sendMessage(tab.id, message);
+            const retryTimeoutPromise = new Promise((_, reject) => {
+              setTimeout(() => reject(new Error('Retry timeout')), 5000);
+            });
+
+            const result = await Promise.race([retryPromise, retryTimeoutPromise]);
+            this.showNotification('Reconnected successfully!', 'success');
+            console.log('Message retry result:', result);
+            return result;
+          } catch (retryError) {
+            console.error('Message retry failed:', retryError);
+            throw new Error('Could not connect to page. Please refresh the page and try again.');
+          }
+        }
+        throw error;
+      }
     } catch (error) {
       console.error('Failed to send message to tab:', error);
       throw error;
+    }
+  }
+
+  async ensureContentScriptInjected(tabId) {
+    try {
+      // First try to ping the content script with short timeout
+      const pingPromise = chrome.tabs.sendMessage(tabId, { action: 'ping' });
+      const pingTimeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Ping timeout')), 2000);
+      });
+
+      await Promise.race([pingPromise, pingTimeoutPromise]);
+      console.log('Content script is already available');
+    } catch (error) {
+      console.log('Content script not responding, injecting...');
+
+      // Inject content script via background script
+      try {
+        await chrome.runtime.sendMessage({
+          action: 'injectContentScript',
+          tabId: tabId
+        });
+        console.log('Content script injection requested');
+      } catch (bgError) {
+        console.error('Failed to request content script injection:', bgError);
+        // Fallback: inject directly if possible
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            files: ['content.js']
+          });
+          await chrome.scripting.insertCSS({
+            target: { tabId: tabId },
+            files: ['content.css']
+          });
+          console.log('Content script injected directly');
+        } catch (injectError) {
+          console.error('Direct injection also failed:', injectError);
+          throw new Error('Could not inject content script');
+        }
+      }
     }
   }
 

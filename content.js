@@ -51,6 +51,10 @@ class E2EContentScript {
   setupMessageListener() {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       switch (message.action) {
+        case 'ping':
+          // Simple ping to verify content script is alive and responsive
+          sendResponse({ success: true, message: 'Content script is ready' });
+          break;
         case 'startRecording':
           this.startRecording(message.testName);
           break;
@@ -419,6 +423,28 @@ class E2EContentScript {
     }, duration);
   }
 
+  async updateBaselineScreenshot(step, newScreenshot, stepNumber) {
+    try {
+      console.log(`Updating baseline screenshot for step ${stepNumber}...`);
+
+      // Update the step's screenshot with the new one
+      step.screenshot = newScreenshot;
+
+      // Send the updated step back to popup for storage
+      await chrome.runtime.sendMessage({
+        action: 'updateStepScreenshot',
+        stepNumber: stepNumber,
+        newScreenshot: newScreenshot,
+        stepData: step
+      });
+
+      console.log(`Baseline screenshot updated successfully for step ${stepNumber}`);
+    } catch (error) {
+      console.error('Failed to update baseline screenshot:', error);
+      throw error;
+    }
+  }
+
   generateSelector(element) {
     if (element.id) {
       return `#${element.id}`;
@@ -646,6 +672,10 @@ class E2EContentScript {
         const userChoice = await this.showVisualDiff(visualDiff, step, currentStep);
         if (userChoice === 'stop') {
           throw new Error(`Visual regression test failed at step ${currentStep}: ${visualDiff.differencePercentage.toFixed(2)}% difference detected`);
+        } else if (userChoice === 'update') {
+          // Update baseline screenshot
+          await this.updateBaselineScreenshot(step, visualDiff.current, currentStep);
+          this.showScreenshotIndicator('✓ Baseline updated, continuing test');
         } else {
           this.showScreenshotIndicator('✓ Visual difference accepted, continuing test');
         }
@@ -719,6 +749,10 @@ class E2EContentScript {
       const userChoice = await this.showVisualDiff(visualDiff, step, currentStep);
       if (userChoice === 'stop') {
         throw new Error(`Visual regression test failed at step ${currentStep}`);
+      } else if (userChoice === 'update') {
+        // Update baseline screenshot for this step
+        await this.updateBaselineScreenshot(step, visualDiff.current, currentStep);
+        console.log(`Baseline screenshot updated for step ${currentStep}`);
       }
     }
 
@@ -969,6 +1003,15 @@ class E2EContentScript {
       </div>
 
       <div style="text-align: center;">
+        <button id="update-baseline" style="
+          background: #3b82f6;
+          color: white;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 6px;
+          margin-right: 10px;
+          cursor: pointer;
+        ">Update Baseline</button>
         <button id="continue-test" style="
           background: #10b981;
           color: white;
@@ -994,6 +1037,11 @@ class E2EContentScript {
 
     // Add event listeners
     return new Promise((resolve) => {
+      document.getElementById('update-baseline').addEventListener('click', () => {
+        document.body.removeChild(diffOverlay);
+        resolve('update');
+      });
+
       document.getElementById('continue-test').addEventListener('click', () => {
         document.body.removeChild(diffOverlay);
         resolve('continue');

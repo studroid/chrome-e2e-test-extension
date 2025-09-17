@@ -39,6 +39,28 @@ class E2EBackgroundScript {
               sendResponse({ error: error.message });
             });
           return true; // Keep message channel open for async response
+        case 'injectContentScript':
+          this.injectContentScript(message.tabId)
+            .then(() => {
+              console.log('Content script injection completed');
+              sendResponse({ success: true });
+            })
+            .catch(error => {
+              console.error('Content script injection failed:', error);
+              sendResponse({ error: error.message });
+            });
+          return true; // Keep message channel open for async response
+        case 'updateStepScreenshot':
+          this.updateStepScreenshot(message.stepNumber, message.newScreenshot, message.stepData)
+            .then(() => {
+              console.log('Step screenshot updated successfully');
+              sendResponse({ success: true });
+            })
+            .catch(error => {
+              console.error('Step screenshot update failed:', error);
+              sendResponse({ error: error.message });
+            });
+          return true; // Keep message channel open for async response
         default:
           console.log('Unknown action:', message.action);
           sendResponse({ error: 'Unknown action' });
@@ -350,6 +372,45 @@ class E2EBackgroundScript {
     code += `${test.name.replace(/[^a-zA-Z0-9]/g, '_')}();`;
 
     return code;
+  }
+
+  async updateStepScreenshot(stepNumber, newScreenshot, stepData) {
+    try {
+      console.log(`Updating screenshot for step ${stepNumber}`);
+
+      // Get all tests from storage
+      const result = await chrome.storage.local.get(['e2eTests']);
+      const tests = result.e2eTests || [];
+
+      // Find and update the test that contains this step
+      let updated = false;
+      for (let test of tests) {
+        for (let i = 0; i < test.steps.length; i++) {
+          if (test.steps[i].timestamp === stepData.timestamp &&
+              test.steps[i].type === stepData.type &&
+              test.steps[i].selector === stepData.selector) {
+            // Update the screenshot for this step
+            test.steps[i].screenshot = newScreenshot;
+            updated = true;
+            console.log(`Updated screenshot in test "${test.name}", step ${i + 1}`);
+            break;
+          }
+        }
+        if (updated) break;
+      }
+
+      if (updated) {
+        // Save the updated tests back to storage
+        await chrome.storage.local.set({ e2eTests: tests });
+        console.log('Test data saved with updated screenshot');
+      } else {
+        console.warn('Could not find matching step to update');
+      }
+
+    } catch (error) {
+      console.error('Failed to update step screenshot:', error);
+      throw error;
+    }
   }
 }
 
