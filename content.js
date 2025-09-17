@@ -1265,6 +1265,18 @@ class E2EContentScript {
         // Save progress before each step (in case of navigation)
         await this.saveTestExecutionState(test, i + 1, startTime);
 
+        // Send progress update to popup
+        try {
+          chrome.runtime.sendMessage({
+            action: 'testProgress',
+            testName: testName,
+            currentStep: i + 1,
+            totalSteps: steps.length
+          });
+        } catch (error) {
+          // Ignore error, progress update is not critical
+        }
+
         await this.executeStep(step, i + 1, steps.length);
 
         // Update progress in overlay
@@ -1292,6 +1304,17 @@ class E2EContentScript {
     this.showTestResult(true, testName, totalSteps, null, duration);
 
     console.log(`✅ Test "${testName}" completed successfully in ${duration}ms`);
+
+    // Notify popup about test completion
+    try {
+      chrome.runtime.sendMessage({
+        action: 'testCompleted',
+        testName: testName,
+        duration: duration
+      });
+    } catch (error) {
+      console.warn('Failed to notify popup about test completion:', error);
+    }
 
     // Clean up immediately
     await this.cleanupTestExecution();
@@ -1330,6 +1353,17 @@ class E2EContentScript {
     // IMMEDIATE cleanup on failure - FIRST PRIORITY
     this.cleanupTestExecutionSync();
     console.log(`✅ Current isReplaying state after cleanup: ${this.isReplaying}`);
+
+    // Notify popup about test failure
+    try {
+      chrome.runtime.sendMessage({
+        action: 'testFailed',
+        testName: testName,
+        error: error.message
+      });
+    } catch (msgError) {
+      console.warn('Failed to notify popup about test failure:', msgError);
+    }
 
     // Now handle UI updates
     this.overlay.textContent = `✗ Replay failed: ${error.message}`;

@@ -2,6 +2,7 @@ class E2ETestRecorder {
   constructor() {
     this.isRecording = false;
     this.currentTest = null;
+    this.currentReplayingTest = null; // Track currently replaying test
     this.tests = [];
     this.init();
   }
@@ -10,7 +11,26 @@ class E2ETestRecorder {
     await this.loadTests();
     await this.loadRecordingState();
     this.setupEventListeners();
+    this.setupMessageListener();
     this.updateUI();
+  }
+
+  setupMessageListener() {
+    // Listen for messages from content script about test completion
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.action === 'testCompleted' || message.action === 'testFailed') {
+        console.log(`Test ${message.action}: ${message.testName}`);
+        // Clear replaying state
+        if (this.currentReplayingTest && this.currentReplayingTest.name === message.testName) {
+          this.currentReplayingTest = null;
+          this.updateUI();
+        }
+      } else if (message.action === 'testProgress') {
+        // Update progress if needed
+        console.log(`Test progress: ${message.testName} - Step ${message.currentStep}/${message.totalSteps}`);
+        this.updateUI();
+      }
+    });
   }
 
   async loadTests() {
@@ -537,7 +557,17 @@ class E2ETestRecorder {
 
   async replayTest(test) {
     try {
+      // Check if already replaying
+      if (this.currentReplayingTest) {
+        this.showNotification('Another test is already running', 'warning');
+        return;
+      }
+
       this.showNotification('Starting test replay...', 'info');
+
+      // Set current replaying test
+      this.currentReplayingTest = test;
+      this.updateUI(); // Update UI to show replaying state
 
       // Start replay FIRST
       await this.sendMessageToActiveTab({
@@ -772,6 +802,7 @@ class E2ETestRecorder {
     }
 
     container.innerHTML = this.tests.map((test, index) => {
+      const isReplaying = this.currentReplayingTest && this.currentReplayingTest.name === test.name;
       const screenshotSteps = test.steps.filter(step => step.type === 'screenshot' || step.screenshot);
       const screenshotCount = screenshotSteps.length;
       const screenshotsHtml = screenshotCount > 0 ? `
@@ -786,9 +817,13 @@ class E2ETestRecorder {
       ` : '';
 
       return `
-        <div class="test-item">
+        <div class="test-item ${isReplaying ? 'replaying' : ''}">
           <div>
-            <div class="test-name">${this.escapeHtml(test.name)}</div>
+            <div class="test-name">
+              ${isReplaying ? '<span class="replaying-indicator">▶</span> ' : ''}
+              ${this.escapeHtml(test.name)}
+              ${isReplaying ? ' <span class="replaying-label">(Running...)</span>' : ''}
+            </div>
             <div style="font-size: 12px; color: #6b7280;">
               ${test.steps.length} steps • ${new Date(test.timestamp).toLocaleDateString()}
               ${screenshotCount > 0 ? ` • ${screenshotCount} screenshots` : ''}
@@ -796,13 +831,13 @@ class E2ETestRecorder {
             ${screenshotsHtml}
           </div>
           <div class="test-actions">
-            <button class="btn-primary" data-action="replay" data-index="${index}">
-              Replay
+            <button class="btn-primary" data-action="replay" data-index="${index}" ${isReplaying ? 'disabled' : ''}>
+              ${isReplaying ? 'Running...' : 'Replay'}
             </button>
             <button class="btn-secondary" data-action="export" data-index="${index}">
               Export
             </button>
-            <button class="btn-danger" data-action="delete" data-index="${index}">
+            <button class="btn-danger" data-action="delete" data-index="${index}" ${isReplaying ? 'disabled' : ''}>
               Delete
             </button>
           </div>
