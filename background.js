@@ -8,6 +8,7 @@ class E2EBackgroundScript {
     this.setupTabUpdateListener();
     this.setupCommandListener();
     this.setupContextMenu();
+    this.setupMessageListener();
   }
 
   setupInstallListener() {
@@ -20,6 +21,46 @@ class E2EBackgroundScript {
         this.migrateData();
       }
     });
+  }
+
+  setupMessageListener() {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      console.log('Background received message:', message);
+
+      switch (message.action) {
+        case 'captureScreenshot':
+          this.captureScreenshot(sender.tab?.id)
+            .then(dataUrl => {
+              console.log('Screenshot captured successfully');
+              sendResponse({ dataUrl });
+            })
+            .catch(error => {
+              console.error('Screenshot capture error in background:', error);
+              sendResponse({ error: error.message });
+            });
+          return true; // Keep message channel open for async response
+        default:
+          console.log('Unknown action:', message.action);
+          sendResponse({ error: 'Unknown action' });
+      }
+    });
+  }
+
+  async captureScreenshot(tabId) {
+    try {
+      console.log('Attempting to capture screenshot for tab:', tabId);
+
+      // Try to capture the visible tab
+      const dataUrl = await chrome.tabs.captureVisibleTab(null, {
+        format: 'png'
+      });
+
+      console.log('Screenshot data URL length:', dataUrl?.length);
+      return dataUrl;
+    } catch (error) {
+      console.error('Screenshot capture failed:', error);
+      throw error;
+    }
   }
 
   setupTabUpdateListener() {
@@ -73,9 +114,7 @@ class E2EBackgroundScript {
       e2eTests: [],
       settings: {
         recordingDelay: 100,
-        replayDelay: 500,
-        highlightElements: true,
-        autoScroll: true
+        replayDelay: 300
       }
     };
 
@@ -89,9 +128,7 @@ class E2EBackgroundScript {
       await chrome.storage.local.set({
         settings: {
           recordingDelay: 100,
-          replayDelay: 500,
-          highlightElements: true,
-          autoScroll: true
+          replayDelay: 300
         }
       });
     }
