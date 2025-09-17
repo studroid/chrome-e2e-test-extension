@@ -4,6 +4,7 @@ class E2ETestRecorder {
     this.currentTest = null;
     this.currentReplayingTest = null; // Track currently replaying test
     this.tests = [];
+    this.expandedTests = new Set(); // Track which tests have expanded step lists
     this.init();
   }
 
@@ -870,6 +871,10 @@ class E2ETestRecorder {
       const progressInfo = isReplaying && this.currentReplayingTest.currentStep && this.currentReplayingTest.totalSteps ?
         ` (Step ${this.currentReplayingTest.currentStep}/${this.currentReplayingTest.totalSteps})` : '';
 
+      const testKey = `${test.name}_${test.timestamp}`;
+      const isExpanded = this.expandedTests.has(testKey);
+      const stepsHtml = isExpanded ? this.renderStepList(test, isReplaying) : '';
+
       return `
         <div class="test-item ${isReplaying ? 'replaying' : ''}">
           <div>
@@ -878,11 +883,17 @@ class E2ETestRecorder {
               ${this.escapeHtml(test.name)}
               ${isReplaying ? ` <span class="replaying-label">(Running${progressInfo}...)</span>` : ''}
             </div>
-            <div style="font-size: 12px; color: #6b7280;">
-              ${test.steps.length} steps • ${new Date(test.timestamp).toLocaleDateString()}
-              ${screenshotCount > 0 ? ` • ${screenshotCount} screenshots` : ''}
+            <div class="test-info">
+              <span style="font-size: 12px; color: #6b7280;">
+                ${test.steps.length} steps • ${new Date(test.timestamp).toLocaleDateString()}
+                ${screenshotCount > 0 ? ` • ${screenshotCount} screenshots` : ''}
+              </span>
+              <button class="btn-steps" data-action="toggleSteps" data-index="${index}">
+                ${isExpanded ? '▲ Hide Steps' : '▼ Show Steps'}
+              </button>
             </div>
             ${screenshotsHtml}
+            ${stepsHtml}
           </div>
           <div class="test-actions">
             <button class="btn-primary" data-action="replay" data-index="${index}" ${isReplaying ? 'disabled' : ''}>
@@ -915,6 +926,9 @@ class E2ETestRecorder {
           case 'delete':
             this.deleteTest(index);
             break;
+          case 'toggleSteps':
+            this.toggleSteps(index);
+            break;
         }
       });
     });
@@ -925,6 +939,86 @@ class E2ETestRecorder {
         this.showScreenshotModal(e.target.src);
       });
     });
+  }
+
+  renderStepList(test, isReplaying = false) {
+    if (!test.steps || test.steps.length === 0) {
+      return '<div class="test-steps"><div class="no-steps">No steps recorded</div></div>';
+    }
+
+    const currentStep = isReplaying && this.currentReplayingTest ? this.currentReplayingTest.currentStep : 0;
+
+    const stepsHtml = test.steps.map((step, index) => {
+      const stepNumber = index + 1;
+      let status = 'pending';
+      let statusIcon = '⏳';
+      let statusClass = 'step-pending';
+
+      if (isReplaying && this.currentReplayingTest) {
+        if (stepNumber < currentStep) {
+          status = 'completed';
+          statusIcon = '✅';
+          statusClass = 'step-completed';
+        } else if (stepNumber === currentStep) {
+          status = 'current';
+          statusIcon = '▶️';
+          statusClass = 'step-current';
+        }
+      }
+
+      // Format step description
+      let stepDescription = this.formatStepDescription(step);
+
+      return `
+        <div class="step-item ${statusClass}">
+          <span class="step-status">${statusIcon}</span>
+          <span class="step-number">${stepNumber}.</span>
+          <span class="step-description">${stepDescription}</span>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="test-steps">
+        ${stepsHtml}
+      </div>
+    `;
+  }
+
+  formatStepDescription(step) {
+    switch (step.type) {
+      case 'click':
+        return `Click: <code>${this.truncateSelector(step.selector)}</code>`;
+      case 'input':
+        return `Input: <code>${this.truncateSelector(step.selector)}</code> = "${this.escapeHtml(step.value || '')}"`;
+      case 'keypress':
+        return `Key: <code>${step.key}</code> on <code>${this.truncateSelector(step.selector)}</code>`;
+      case 'change':
+        return `Change: <code>${this.truncateSelector(step.selector)}</code> = "${this.escapeHtml(step.value || '')}"`;
+      case 'screenshot':
+        return `Screenshot checkpoint`;
+      default:
+        return `${step.type}: <code>${this.truncateSelector(step.selector || 'unknown')}</code>`;
+    }
+  }
+
+  truncateSelector(selector) {
+    if (!selector) return 'unknown';
+    if (selector.length <= 50) return selector;
+    return selector.substring(0, 47) + '...';
+  }
+
+  toggleSteps(index) {
+    const test = this.tests[index];
+    const testKey = `${test.name}_${test.timestamp}`;
+
+    if (this.expandedTests.has(testKey)) {
+      this.expandedTests.delete(testKey);
+    } else {
+      this.expandedTests.add(testKey);
+    }
+
+    this.updateUI();
   }
 
   showScreenshotModal(imageSrc) {

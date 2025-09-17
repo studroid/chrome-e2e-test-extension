@@ -173,6 +173,121 @@
       color: #1f2937;
     }
 
+    .test-info {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 5px;
+    }
+
+    .btn-steps {
+      background: #f3f4f6;
+      border: 1px solid #d1d5db;
+      color: #374151;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-steps:hover {
+      background: #e5e7eb;
+      border-color: #9ca3af;
+    }
+
+    .test-steps {
+      margin-top: 10px;
+      padding: 8px;
+      background: #f9fafb;
+      border-radius: 6px;
+      border: 1px solid #e5e7eb;
+      animation: slideDown 0.3s ease-out;
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        max-height: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+      }
+      to {
+        opacity: 1;
+        max-height: 500px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+      }
+    }
+
+    .step-item {
+      display: flex;
+      align-items: center;
+      padding: 4px 0;
+      font-size: 12px;
+      gap: 6px;
+    }
+
+    .step-status {
+      font-size: 14px;
+      width: 16px;
+      text-align: center;
+    }
+
+    .step-number {
+      font-weight: 500;
+      color: #6b7280;
+      min-width: 20px;
+    }
+
+    .step-description {
+      flex: 1;
+      color: #374151;
+    }
+
+    .step-description code {
+      background: #f3f4f6;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 11px;
+      color: #1f2937;
+      border: 1px solid #e5e7eb;
+    }
+
+    .step-pending {
+      color: #6b7280;
+    }
+
+    .step-current {
+      background: #dbeafe;
+      border-radius: 4px;
+      padding: 4px 6px;
+      color: #1d4ed8;
+      font-weight: 500;
+      animation: pulse-step 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse-step {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.02); }
+    }
+
+    .step-completed {
+      color: #10b981;
+    }
+
+    .step-completed .step-description {
+      opacity: 0.8;
+    }
+
+    .no-steps {
+      text-align: center;
+      color: #9ca3af;
+      font-style: italic;
+      padding: 10px;
+    }
+
     .test-actions {
       display: flex;
       gap: 5px;
