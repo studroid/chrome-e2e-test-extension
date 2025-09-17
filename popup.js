@@ -108,6 +108,7 @@ class E2ETestRecorder {
   setupEventListeners() {
     document.getElementById('startRecording').addEventListener('click', () => this.startRecording());
     document.getElementById('stopRecording').addEventListener('click', () => this.stopRecording());
+    document.getElementById('forceStopTest').addEventListener('click', () => this.forceStopTest());
     document.getElementById('captureScreenshot').addEventListener('click', () => this.captureScreenshot());
     document.getElementById('importTests').addEventListener('click', () => this.importTests());
     document.getElementById('exportAllTests').addEventListener('click', () => this.exportAllTests());
@@ -818,9 +819,19 @@ class E2ETestRecorder {
     const statusElement = document.getElementById('status');
     const startButton = document.getElementById('startRecording');
     const stopButton = document.getElementById('stopRecording');
+    const forceStopButton = document.getElementById('forceStopTest');
     const screenshotButton = document.getElementById('captureScreenshot');
     const testListElement = document.getElementById('testList');
     const testNameInput = document.getElementById('testName');
+
+    // Show force stop button only when test is replaying
+    if (this.currentReplayingTest) {
+      forceStopButton.style.display = 'block';
+      statusElement.textContent = `Replaying: ${this.currentReplayingTest.name} (${this.currentReplayingTest.currentStep || 0}/${this.currentReplayingTest.totalSteps || 0})`;
+      statusElement.className = 'status replaying';
+    } else {
+      forceStopButton.style.display = 'none';
+    }
 
     if (this.isRecording && this.currentTest) {
       statusElement.textContent = `Recording: ${this.currentTest.name}`;
@@ -831,7 +842,7 @@ class E2ETestRecorder {
       screenshotButton.textContent = '📸 Capture Test Screenshot';
       testNameInput.disabled = true;
       testNameInput.value = this.currentTest.name;
-    } else {
+    } else if (!this.currentReplayingTest) {
       statusElement.textContent = 'Ready to record';
       statusElement.className = 'status idle';
       startButton.disabled = false;
@@ -1048,6 +1059,37 @@ class E2ETestRecorder {
 
   delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // Force stop currently running test
+  async forceStopTest() {
+    if (!this.currentReplayingTest) {
+      this.showNotification('No test is currently running', 'info');
+      return;
+    }
+
+    const testName = this.currentReplayingTest.name;
+    console.log(`🛑 Force stopping test: ${testName}`);
+
+    try {
+      // Send force stop message to content script
+      await this.sendMessageToActiveTab({
+        action: 'forceStopTest',
+        executionId: this.currentReplayingTest.executionId
+      });
+
+      // Reset local state
+      this.currentReplayingTest = null;
+      await this.clearReplayState();
+
+      this.updateUI();
+      this.showNotification(`🛑 Test "${testName}" forcefully stopped`, 'warning');
+
+    } catch (error) {
+      console.error('Failed to force stop test:', error);
+      // If messaging fails, fall back to force reset
+      await this.forceResetTestState();
+    }
   }
 
   // Emergency force reset function

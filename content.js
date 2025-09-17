@@ -11,6 +11,7 @@ class E2EContentScript {
     this.recordedSteps = [];
     this.highlightedElement = null;
     this.overlay = null;
+    this.isTestInterrupted = false; // Flag to interrupt test execution
     this.settings = {
       recordingDelay: 100,
       replayDelay: 300
@@ -86,6 +87,12 @@ class E2EContentScript {
           console.log('🚨 Received force reset command');
           this.forceResetReplayState();
           sendResponse({ success: true, message: 'State forcefully reset' });
+          break;
+        case 'forceStopTest':
+          // Force stop specific test
+          console.log(`🛑 Received force stop command for execution ID: ${message.executionId}`);
+          this.forceStopTest(message.executionId);
+          sendResponse({ success: true, message: 'Test forcefully stopped' });
           break;
         case 'startRecording':
           this.startRecording(message.testName);
@@ -1113,6 +1120,9 @@ class E2EContentScript {
 
     console.log(`🎬 Starting test replay: "${test.name}" (ID: ${executionId})`);
 
+    // Clear any previous interruption flag
+    this.isTestInterrupted = false;
+
     // Store execution ID for message tracking
     this.currentExecutionId = executionId;
 
@@ -1187,6 +1197,9 @@ class E2EContentScript {
 
     console.log('🔄 Resuming test from saved state:', executionState);
 
+    // Clear any previous interruption flag
+    this.isTestInterrupted = false;
+
     this.isReplaying = true;
     this.overlay.textContent = `Resuming test...`;
     this.overlay.style.display = 'block';
@@ -1205,11 +1218,79 @@ class E2EContentScript {
   }
 
   // Force reset replay state - used for recovery
+  forceStopTest(executionId = null) {
+    console.log(`🛑 Force stopping test (execution ID: ${executionId})`);
+
+    // If execution ID is provided, only stop if it matches current test
+    if (executionId && this.currentExecutionId && this.currentExecutionId !== executionId) {
+      console.log(`⚠️ Execution ID mismatch - current: ${this.currentExecutionId}, requested: ${executionId}`);
+      return;
+    }
+
+    if (!this.isReplaying) {
+      console.log('⚠️ No test is currently replaying');
+      return;
+    }
+
+    console.log(`  Stopping test execution for ID: ${this.currentExecutionId}`);
+
+    // Set interruption flag to stop ongoing test execution
+    this.isTestInterrupted = true;
+
+    // Reset replay state
+    this.isReplaying = false;
+    this.currentExecutionId = null;
+
+    if (this.currentReplayTimeout) {
+      clearTimeout(this.currentReplayTimeout);
+      this.currentReplayTimeout = null;
+    }
+
+    if (this.overlay) {
+      this.overlay.textContent = 'Test stopped by user';
+      this.overlay.style.background = '#ef4444';
+      // Hide after showing message
+      setTimeout(() => {
+        if (this.overlay) {
+          this.overlay.style.display = 'none';
+        }
+      }, 2000);
+    }
+
+    // Clear execution state from background
+    try {
+      chrome.runtime.sendMessage({ action: 'clearTestExecutionState' });
+    } catch (error) {
+      console.warn('Failed to clear execution state during force stop:', error);
+    }
+
+    // Notify popup that test was stopped
+    try {
+      chrome.runtime.sendMessage({
+        action: 'testCompleted',
+        testName: 'Force Stopped',
+        executionId: executionId,
+        forceStopped: true
+      });
+    } catch (error) {
+      console.warn('Failed to notify popup of force stop:', error);
+    }
+
+    // Reset interruption flag after a short delay to allow for cleanup
+    setTimeout(() => {
+      this.isTestInterrupted = false;
+      console.log('🔄 Interruption flag cleared, ready for new tests');
+    }, 1000);
+
+    console.log('✅ Test forcefully stopped');
+  }
+
   forceResetReplayState() {
     console.log('🔄 Force resetting replay state');
     console.log(`  Before reset - isReplaying: ${this.isReplaying}`);
 
     this.isReplaying = false;
+    this.isTestInterrupted = false; // Clear interruption flag
     this.currentExecutionId = null; // Clear execution ID
 
     if (this.currentReplayTimeout) {
@@ -1258,9 +1339,9 @@ class E2EContentScript {
       for (let i = startStepIndex; i < steps.length; i++) {
         const step = steps[i];
 
-        // Check if test execution was cancelled
-        if (!this.isReplaying) {
-          console.log('🛑 Test execution was cancelled');
+        // Check if test execution was cancelled or interrupted
+        if (!this.isReplaying || this.isTestInterrupted) {
+          console.log(`🛑 Test execution was ${this.isTestInterrupted ? 'interrupted' : 'cancelled'}`);
           return;
         }
 
@@ -1334,8 +1415,9 @@ class E2EContentScript {
       console.warn('Failed to clear execution state:', error);
     }
 
-    // Reset state immediately instead of using setTimeout
+    // Reset all state immediately instead of using setTimeout
     this.isReplaying = false;
+    this.isTestInterrupted = false; // Clear interruption flag
     if (this.currentReplayTimeout) {
       clearTimeout(this.currentReplayTimeout);
       this.currentReplayTimeout = null;
@@ -1435,6 +1517,12 @@ class E2EContentScript {
   }
 
   async executeStep(step, currentStep, totalSteps) {
+    // Check for interruption at the start of each step
+    if (this.isTestInterrupted) {
+      console.log('🛑 Step execution interrupted');
+      throw new Error('Test execution was interrupted');
+    }
+
     this.overlay.textContent = `Replaying: ${currentStep}/${totalSteps}`;
 
     // Handle screenshot steps differently (no element interaction needed)
@@ -1659,7 +1747,8 @@ class E2EContentScript {
     return new Promise((resolve, reject) => {
       console.log('Starting compareScreenshots...');
       const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
+      // Set willReadFrequently to true for better performance with getImageData
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
       const baselineImg = new Image();
       const currentImg = new Image();
@@ -1670,11 +1759,11 @@ class E2EContentScript {
       // Set timeout to prevent infinite waiting
       const timeout = setTimeout(() => {
         if (!isResolved) {
-          console.error('Screenshot comparison timed out after 15 seconds');
+          console.error('Screenshot comparison timed out after 8 seconds');
           isResolved = true;
-          reject(new Error('Screenshot comparison timed out'));
+          reject(new Error('Screenshot comparison timed out after 8 seconds'));
         }
-      }, 15000);
+      }, 8000); // Reduced from 15 seconds to 8 seconds
 
       const processImages = () => {
         if (isResolved || loadedCount !== 2) return;
@@ -1685,17 +1774,33 @@ class E2EContentScript {
           const height = Math.max(baselineImg.height, currentImg.height);
           console.log(`Comparing images: ${width}x${height}`);
 
+          // Validate image dimensions
+          if (width <= 0 || height <= 0 || width > 5000 || height > 5000) {
+            throw new Error(`Invalid image dimensions: ${width}x${height}`);
+          }
+
           canvas.width = width;
           canvas.height = height;
 
           // Draw baseline image
           ctx.drawImage(baselineImg, 0, 0);
-          const baselineData = ctx.getImageData(0, 0, width, height);
+          let baselineData, currentData;
+
+          try {
+            baselineData = ctx.getImageData(0, 0, width, height);
+          } catch (error) {
+            throw new Error(`Failed to get baseline image data: ${error.message}`);
+          }
 
           // Clear and draw current image
           ctx.clearRect(0, 0, width, height);
           ctx.drawImage(currentImg, 0, 0);
-          const currentData = ctx.getImageData(0, 0, width, height);
+
+          try {
+            currentData = ctx.getImageData(0, 0, width, height);
+          } catch (error) {
+            throw new Error(`Failed to get current image data: ${error.message}`);
+          }
 
           // Create diff image
           const diffData = ctx.createImageData(width, height);
