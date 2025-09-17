@@ -1327,6 +1327,11 @@ class E2EContentScript {
     console.error(`❌ Test "${testName}" failed:`, error);
     console.log(`🔄 Current isReplaying state before cleanup: ${this.isReplaying}`);
 
+    // IMMEDIATE cleanup on failure - FIRST PRIORITY
+    this.cleanupTestExecutionSync();
+    console.log(`✅ Current isReplaying state after cleanup: ${this.isReplaying}`);
+
+    // Now handle UI updates
     this.overlay.textContent = `✗ Replay failed: ${error.message}`;
     this.overlay.style.background = '#dc2626';
     this.overlay.style.display = 'block';
@@ -1335,14 +1340,15 @@ class E2EContentScript {
     this.showScreenshotIndicator(`❌ Test Failed: ${error.message.substring(0, 50)}...`, 3000);
 
     const duration = Date.now() - startTime;
-    this.showTestResult(false, testName, steps.length, error.message, duration);
 
-    // Immediate cleanup on failure
-    this.cleanupTestExecutionSync();
+    // Show test result modal (this could potentially fail, so we do it after cleanup)
+    try {
+      this.showTestResult(false, testName, steps.length, error.message, duration);
+    } catch (uiError) {
+      console.error('Failed to show test result modal:', uiError);
+    }
 
-    console.log(`✅ Current isReplaying state after cleanup: ${this.isReplaying}`);
-
-    // Show failure overlay slightly longer but reset state immediately
+    // Show failure overlay slightly longer but state is already reset
     setTimeout(() => {
       if (this.overlay) {
         this.overlay.style.display = 'none';
@@ -1352,12 +1358,21 @@ class E2EContentScript {
 
   cleanupTestExecutionSync() {
     console.log('🧹 Synchronous cleanup after test failure');
+    console.log(`  Cleanup starting - isReplaying was: ${this.isReplaying}`);
 
-    // Reset state immediately
+    // Reset state immediately - multiple assignments to be sure
     this.isReplaying = false;
+
+    // Clear timeout if exists
     if (this.currentReplayTimeout) {
       clearTimeout(this.currentReplayTimeout);
       this.currentReplayTimeout = null;
+    }
+
+    // Double check and force reset again
+    if (this.isReplaying === true) {
+      console.error('⚠️ CRITICAL: isReplaying still true after reset, forcing to false');
+      this.isReplaying = false;
     }
 
     // Clear execution state (fire and forget)
@@ -1365,6 +1380,16 @@ class E2EContentScript {
       chrome.runtime.sendMessage({ action: 'clearTestExecutionState' });
     } catch (error) {
       console.warn('Failed to clear execution state during sync cleanup:', error);
+    }
+
+    console.log(`  Cleanup complete - isReplaying is now: ${this.isReplaying}`);
+
+    // Final verification
+    if (this.isReplaying !== false) {
+      console.error('🚨 CRITICAL ERROR: State reset failed! Manual intervention required');
+      console.error('Run: window.e2eContentScript.isReplaying = false');
+      // Force it one more time
+      this.isReplaying = false;
     }
   }
 
@@ -1823,14 +1848,16 @@ class E2EContentScript {
 
 // Initialize content script
 function initializeE2EContentScript() {
-  if (window.e2eContentScriptInstance) {
+  if (window.e2eContentScript) {
     console.log('E2E Content Script instance already exists, skipping initialization...');
+    console.log('Current state:', window.e2eContentScript.checkState());
     return;
   }
 
-  window.e2eContentScriptInstance = new E2EContentScript();
-  window.E2EContentScript = E2EContentScript; // Mark as loaded
+  window.e2eContentScript = new E2EContentScript();
+  window.E2EContentScript = E2EContentScript; // Mark class as loaded
   console.log('E2E Content Script initialized');
+  console.log('Global access: window.e2eContentScript');
 }
 
 if (document.readyState === 'loading') {
