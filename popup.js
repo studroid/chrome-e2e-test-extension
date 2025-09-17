@@ -176,9 +176,15 @@ class E2ETestRecorder {
   }
 
   async captureScreenshot() {
+    // Only allow screenshot during recording
+    if (!this.isRecording || !this.currentTest) {
+      this.showNotification('Please start recording first to capture test screenshots', 'error');
+      return;
+    }
+
     try {
-      this.showNotification('Capturing screenshot...', 'info');
-      console.log('Starting screenshot capture...');
+      this.showNotification('Capturing test screenshot...', 'info');
+      console.log('Starting screenshot capture during recording...');
 
       // Get current active tab
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -205,21 +211,31 @@ class E2ETestRecorder {
         throw new Error('No screenshot data received');
       }
 
-      // Create screenshot object
-      const screenshot = {
-        id: Date.now(),
-        timestamp: new Date().toISOString(),
+      // Add screenshot as a test step
+      const screenshotStep = {
+        type: 'screenshot',
+        timestamp: Date.now(),
         url: tab.url,
-        dataUrl: dataUrl,
-        title: `Screenshot ${new Date().toLocaleTimeString()}`
+        screenshot: dataUrl,
+        description: 'Visual checkpoint'
       };
 
-      // Save screenshot
-      await this.saveScreenshot(screenshot);
-      console.log('Screenshot saved successfully');
+      // Add to current test steps
+      this.currentTest.steps.push(screenshotStep);
+
+      // Also add to screenshots array for easy access
+      if (!this.currentTest.screenshots) {
+        this.currentTest.screenshots = [];
+      }
+      this.currentTest.screenshots.push(dataUrl);
+
+      // Save current recording state
+      await this.saveRecordingState();
+
+      console.log('Screenshot added to test steps');
 
       // Show success notification
-      this.showNotification('Screenshot captured successfully!', 'success');
+      this.showNotification('Screenshot captured and added to test!', 'success');
 
     } catch (error) {
       console.error('Screenshot capture failed:', error);
@@ -297,9 +313,14 @@ class E2ETestRecorder {
       await this.sendMessageToActiveTab({ action: 'stopRecording' });
 
       const result = await chrome.storage.local.get([`recording_${this.currentTest.name}`]);
-      const recordedSteps = result[`recording_${this.currentTest.name}`] || [];
+      const contentScriptSteps = result[`recording_${this.currentTest.name}`] || [];
 
-      this.currentTest.steps = recordedSteps;
+      // Merge content script steps with popup steps (like screenshots)
+      // Sort all steps by timestamp to maintain proper order
+      const allSteps = [...this.currentTest.steps, ...contentScriptSteps];
+      allSteps.sort((a, b) => a.timestamp - b.timestamp);
+
+      this.currentTest.steps = allSteps;
       this.tests.push(this.currentTest);
       await this.saveTests();
 
@@ -604,6 +625,7 @@ class E2ETestRecorder {
     const statusElement = document.getElementById('status');
     const startButton = document.getElementById('startRecording');
     const stopButton = document.getElementById('stopRecording');
+    const screenshotButton = document.getElementById('captureScreenshot');
     const testListElement = document.getElementById('testList');
     const testNameInput = document.getElementById('testName');
 
@@ -612,6 +634,8 @@ class E2ETestRecorder {
       statusElement.className = 'status recording';
       startButton.disabled = true;
       stopButton.disabled = false;
+      screenshotButton.disabled = false;
+      screenshotButton.textContent = '📸 Capture Test Screenshot';
       testNameInput.disabled = true;
       testNameInput.value = this.currentTest.name;
     } else {
@@ -619,6 +643,8 @@ class E2ETestRecorder {
       statusElement.className = 'status idle';
       startButton.disabled = false;
       stopButton.disabled = true;
+      screenshotButton.disabled = true;
+      screenshotButton.textContent = '📸 Start Recording First';
       testNameInput.disabled = false;
     }
 
@@ -632,10 +658,11 @@ class E2ETestRecorder {
     }
 
     container.innerHTML = this.tests.map((test, index) => {
-      const screenshotCount = test.steps.filter(step => step.screenshot).length;
+      const screenshotSteps = test.steps.filter(step => step.type === 'screenshot' || step.screenshot);
+      const screenshotCount = screenshotSteps.length;
       const screenshotsHtml = screenshotCount > 0 ? `
         <div class="test-screenshots">
-          ${test.steps.filter(step => step.screenshot).slice(0, 6).map((step, stepIndex) => `
+          ${screenshotSteps.slice(0, 6).map((step, stepIndex) => `
             <img src="${step.screenshot}" class="screenshot-thumbnail"
                  data-test-index="${index}" data-step-index="${stepIndex}"
                  title="Step ${stepIndex + 1}: ${step.type}">

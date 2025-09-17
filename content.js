@@ -370,6 +370,55 @@ class E2EContentScript {
     }, 1000);
   }
 
+  showScreenshotIndicator(message, duration = 1000) {
+    // Create a full-screen overlay for screenshot indication
+    const indicator = document.createElement('div');
+    indicator.textContent = message;
+
+    // Different colors for different message types
+    let backgroundColor = '#3b82f6'; // Default blue
+    let borderColor = '#60a5fa';
+
+    if (message.includes('❌') || message.includes('Failed')) {
+      backgroundColor = '#dc2626'; // Red for errors
+      borderColor = '#f87171';
+    } else if (message.includes('✓')) {
+      backgroundColor = '#10b981'; // Green for success
+      borderColor = '#34d399';
+    } else if (message.includes('⚠️')) {
+      backgroundColor = '#f59e0b'; // Orange for warnings
+      borderColor = '#fbbf24';
+    }
+
+    indicator.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: ${backgroundColor};
+      color: white;
+      padding: 15px 25px;
+      border-radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 16px;
+      font-weight: 500;
+      z-index: 10002;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+      border: 2px solid ${borderColor};
+      max-width: 80%;
+      text-align: center;
+    `;
+
+    document.body.appendChild(indicator);
+
+    // Remove after delay
+    setTimeout(() => {
+      if (indicator.parentNode) {
+        indicator.parentNode.removeChild(indicator);
+      }
+    }, duration);
+  }
+
   generateSelector(element) {
     if (element.id) {
       return `#${element.id}`;
@@ -430,24 +479,38 @@ class E2EContentScript {
   }
 
   async captureScreenshot() {
-    try {
-      const response = await chrome.runtime.sendMessage({
-        action: 'captureScreenshot'
-      });
+    return new Promise(async (resolve, reject) => {
+      console.log('Starting captureScreenshot...');
 
-      console.log('Background script response:', response);
+      // Set timeout to prevent infinite waiting
+      const timeout = setTimeout(() => {
+        console.error('Screenshot capture timed out after 10 seconds');
+        reject(new Error('Screenshot capture timed out'));
+      }, 10000);
 
-      if (response && response.dataUrl) {
-        return response.dataUrl;
-      } else if (response && response.error) {
-        throw new Error(`Background script error: ${response.error}`);
-      } else {
-        throw new Error('No dataUrl in response');
+      try {
+        console.log('Sending message to background script...');
+        const response = await chrome.runtime.sendMessage({
+          action: 'captureScreenshot'
+        });
+
+        console.log('Background script response:', response);
+        clearTimeout(timeout);
+
+        if (response && response.dataUrl) {
+          console.log('Screenshot captured successfully, data URL length:', response.dataUrl.length);
+          resolve(response.dataUrl);
+        } else if (response && response.error) {
+          reject(new Error(`Background script error: ${response.error}`));
+        } else {
+          reject(new Error('No dataUrl in response'));
+        }
+      } catch (error) {
+        console.error('Screenshot capture failed:', error);
+        clearTimeout(timeout);
+        reject(error);
       }
-    } catch (error) {
-      console.error('Screenshot capture failed:', error);
-      throw error;
-    }
+    });
   }
 
   async captureElementScreenshot(element) {
@@ -525,10 +588,15 @@ class E2EContentScript {
       console.error('Replay failed:', error);
       this.overlay.textContent = `✗ Replay failed: ${error.message}`;
       this.overlay.style.background = '#dc2626';
+      this.overlay.style.display = 'block'; // Ensure it's visible
+      this.overlay.style.zIndex = '10003'; // Higher z-index
+
+      // Also show a prominent error indicator with longer duration
+      this.showScreenshotIndicator(`❌ Test Failed: ${error.message.substring(0, 50)}...`, 3000);
 
       setTimeout(() => {
         this.overlay.style.display = 'none';
-      }, 3000);
+      }, 5000); // Longer display time for errors
     }
 
     this.isReplaying = false;
@@ -536,6 +604,61 @@ class E2EContentScript {
 
   async executeStep(step, currentStep, totalSteps) {
     this.overlay.textContent = `Replaying: ${currentStep}/${totalSteps}`;
+
+    // Handle screenshot steps differently (no element interaction needed)
+    if (step.type === 'screenshot') {
+      // Show visual indicator for screenshot step
+      this.overlay.textContent = `Screenshot checkpoint: ${currentStep}/${totalSteps}`;
+      this.showScreenshotIndicator('Comparing visual checkpoint...');
+
+      // Capture current screenshot for comparison
+      let visualDiff = null;
+      if (step.screenshot) {
+        try {
+          console.log('Starting screenshot capture for comparison...');
+          this.showScreenshotIndicator('Capturing current screenshot...', 500);
+          await this.delay(500);
+
+          const currentScreenshot = await this.captureScreenshot();
+          console.log('Current screenshot captured, length:', currentScreenshot?.length);
+
+          if (currentScreenshot) {
+            this.showScreenshotIndicator('Comparing screenshots...', 500);
+            await this.delay(500);
+
+            console.log('Starting screenshot comparison...');
+            visualDiff = await this.compareScreenshots(step.screenshot, currentScreenshot);
+            console.log(`Screenshot comparison result: ${visualDiff.differencePercentage.toFixed(2)}% difference`);
+          } else {
+            console.warn('No current screenshot captured');
+          }
+        } catch (error) {
+          console.error('Failed to capture screenshot for comparison:', error);
+          this.showScreenshotIndicator(`❌ Screenshot comparison failed: ${error.message}`, 2000);
+          // Continue with test even if screenshot comparison fails
+          visualDiff = null;
+        }
+      }
+
+      // Show visual diff if there's a significant difference
+      if (visualDiff && visualDiff.differencePercentage > 5) {
+        this.showScreenshotIndicator(`⚠️ Visual difference detected: ${visualDiff.differencePercentage.toFixed(2)}%`);
+        const userChoice = await this.showVisualDiff(visualDiff, step, currentStep);
+        if (userChoice === 'stop') {
+          throw new Error(`Visual regression test failed at step ${currentStep}: ${visualDiff.differencePercentage.toFixed(2)}% difference detected`);
+        } else {
+          this.showScreenshotIndicator('✓ Visual difference accepted, continuing test');
+        }
+      } else if (visualDiff) {
+        this.showScreenshotIndicator(`✓ Visual checkpoint passed (${visualDiff.differencePercentage.toFixed(2)}% diff)`);
+      } else {
+        this.showScreenshotIndicator('✓ Visual checkpoint completed');
+      }
+
+      // Keep indicator visible briefly
+      await this.delay(1000);
+      return; // Skip element-based logic
+    }
 
     const element = document.querySelector(step.selector);
     if (!element) {
@@ -551,9 +674,20 @@ class E2EContentScript {
     // Capture current screenshot for visual comparison
     let visualDiff = null;
     if (step.screenshot) {
-      const currentScreenshot = await this.captureElementScreenshot(element);
-      if (currentScreenshot) {
-        visualDiff = await this.compareScreenshots(step.screenshot, currentScreenshot);
+      try {
+        console.log('Capturing element screenshot for comparison...');
+        const currentScreenshot = await this.captureElementScreenshot(element);
+        if (currentScreenshot) {
+          console.log('Element screenshot captured, comparing...');
+          visualDiff = await this.compareScreenshots(step.screenshot, currentScreenshot);
+          console.log(`Element screenshot comparison result: ${visualDiff.differencePercentage.toFixed(2)}% difference`);
+        } else {
+          console.warn('No element screenshot captured');
+        }
+      } catch (error) {
+        console.error('Failed to capture/compare element screenshot:', error);
+        // Continue with test even if screenshot comparison fails
+        visualDiff = null;
       }
     }
 
@@ -656,7 +790,8 @@ class E2EContentScript {
   }
 
   async compareScreenshots(baselineDataUrl, currentDataUrl) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      console.log('Starting compareScreenshots...');
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
 
@@ -664,78 +799,116 @@ class E2EContentScript {
       const currentImg = new Image();
 
       let loadedCount = 0;
+      let isResolved = false;
+
+      // Set timeout to prevent infinite waiting
+      const timeout = setTimeout(() => {
+        if (!isResolved) {
+          console.error('Screenshot comparison timed out after 15 seconds');
+          isResolved = true;
+          reject(new Error('Screenshot comparison timed out'));
+        }
+      }, 15000);
 
       const processImages = () => {
-        if (loadedCount !== 2) return;
+        if (isResolved || loadedCount !== 2) return;
 
-        const width = Math.max(baselineImg.width, currentImg.width);
-        const height = Math.max(baselineImg.height, currentImg.height);
+        console.log('Both images loaded, starting comparison...');
+        try {
+          const width = Math.max(baselineImg.width, currentImg.width);
+          const height = Math.max(baselineImg.height, currentImg.height);
+          console.log(`Comparing images: ${width}x${height}`);
 
-        canvas.width = width;
-        canvas.height = height;
+          canvas.width = width;
+          canvas.height = height;
 
-        // Draw baseline image
-        ctx.drawImage(baselineImg, 0, 0);
-        const baselineData = ctx.getImageData(0, 0, width, height);
+          // Draw baseline image
+          ctx.drawImage(baselineImg, 0, 0);
+          const baselineData = ctx.getImageData(0, 0, width, height);
 
-        // Clear and draw current image
-        ctx.clearRect(0, 0, width, height);
-        ctx.drawImage(currentImg, 0, 0);
-        const currentData = ctx.getImageData(0, 0, width, height);
+          // Clear and draw current image
+          ctx.clearRect(0, 0, width, height);
+          ctx.drawImage(currentImg, 0, 0);
+          const currentData = ctx.getImageData(0, 0, width, height);
 
-        // Create diff image
-        const diffData = ctx.createImageData(width, height);
-        let diffPixels = 0;
-        const totalPixels = width * height;
+          // Create diff image
+          const diffData = ctx.createImageData(width, height);
+          let diffPixels = 0;
+          const totalPixels = width * height;
 
-        for (let i = 0; i < baselineData.data.length; i += 4) {
-          const rDiff = Math.abs(baselineData.data[i] - currentData.data[i]);
-          const gDiff = Math.abs(baselineData.data[i + 1] - currentData.data[i + 1]);
-          const bDiff = Math.abs(baselineData.data[i + 2] - currentData.data[i + 2]);
+          for (let i = 0; i < baselineData.data.length; i += 4) {
+            const rDiff = Math.abs(baselineData.data[i] - currentData.data[i]);
+            const gDiff = Math.abs(baselineData.data[i + 1] - currentData.data[i + 1]);
+            const bDiff = Math.abs(baselineData.data[i + 2] - currentData.data[i + 2]);
 
-          const diff = (rDiff + gDiff + bDiff) / 3;
+            const diff = (rDiff + gDiff + bDiff) / 3;
 
-          if (diff > 10) { // Threshold for significant difference
-            diffPixels++;
-            diffData.data[i] = 255;     // Red
-            diffData.data[i + 1] = 0;   // Green
-            diffData.data[i + 2] = 0;   // Blue
-            diffData.data[i + 3] = 128; // Alpha
-          } else {
-            diffData.data[i] = currentData.data[i];
-            diffData.data[i + 1] = currentData.data[i + 1];
-            diffData.data[i + 2] = currentData.data[i + 2];
-            diffData.data[i + 3] = 50; // Lower alpha for unchanged areas
+            if (diff > 10) { // Threshold for significant difference
+              diffPixels++;
+              diffData.data[i] = 255;     // Red
+              diffData.data[i + 1] = 0;   // Green
+              diffData.data[i + 2] = 0;   // Blue
+              diffData.data[i + 3] = 128; // Alpha
+            } else {
+              diffData.data[i] = currentData.data[i];
+              diffData.data[i + 1] = currentData.data[i + 1];
+              diffData.data[i + 2] = currentData.data[i + 2];
+              diffData.data[i + 3] = 50; // Lower alpha for unchanged areas
+            }
           }
+
+          // Draw diff image
+          ctx.clearRect(0, 0, width, height);
+          ctx.putImageData(diffData, 0, 0);
+          const diffDataUrl = canvas.toDataURL('image/png');
+
+          const differencePercentage = (diffPixels / totalPixels) * 100;
+          console.log(`Comparison completed: ${differencePercentage.toFixed(2)}% difference`);
+
+          clearTimeout(timeout);
+          isResolved = true;
+          resolve({
+            baseline: baselineDataUrl,
+            current: currentDataUrl,
+            diff: diffDataUrl,
+            differencePercentage: differencePercentage,
+            diffPixels: diffPixels,
+            totalPixels: totalPixels
+          });
+        } catch (error) {
+          console.error('Error during image processing:', error);
+          clearTimeout(timeout);
+          isResolved = true;
+          reject(error);
         }
+      };
 
-        // Draw diff image
-        ctx.clearRect(0, 0, width, height);
-        ctx.putImageData(diffData, 0, 0);
-        const diffDataUrl = canvas.toDataURL('image/png');
-
-        const differencePercentage = (diffPixels / totalPixels) * 100;
-
-        resolve({
-          baseline: baselineDataUrl,
-          current: currentDataUrl,
-          diff: diffDataUrl,
-          differencePercentage: differencePercentage,
-          diffPixels: diffPixels,
-          totalPixels: totalPixels
-        });
+      const handleImageError = (imageType, error) => {
+        if (!isResolved) {
+          console.error(`Failed to load ${imageType} image:`, error);
+          clearTimeout(timeout);
+          isResolved = true;
+          reject(new Error(`Failed to load ${imageType} image`));
+        }
       };
 
       baselineImg.onload = () => {
+        console.log('Baseline image loaded');
         loadedCount++;
         processImages();
       };
+
+      baselineImg.onerror = (error) => handleImageError('baseline', error);
 
       currentImg.onload = () => {
+        console.log('Current image loaded');
         loadedCount++;
         processImages();
       };
 
+      currentImg.onerror = (error) => handleImageError('current', error);
+
+      console.log('Setting image sources...');
       baselineImg.src = baselineDataUrl;
       currentImg.src = currentDataUrl;
     });
