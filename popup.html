@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 350px;
+      padding: 15px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      background: #f8f9fa;
+      margin: 0;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid #e1e5e9;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 18px;
+      color: #1f2937;
+    }
+
+    .status {
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-weight: 500;
+      text-align: center;
+      margin-bottom: 15px;
+    }
+
+    .status.idle {
+      background: #f3f4f6;
+      color: #6b7280;
+    }
+
+    .status.recording {
+      background: #fef3c7;
+      color: #d97706;
+    }
+
+    .status.replaying {
+      background: #dbeafe;
+      color: #1d4ed8;
+    }
+
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    button {
+      padding: 10px 15px;
+      border: none;
+      border-radius: 6px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 14px;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: #3b82f6;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #2563eb;
+    }
+
+    .btn-success {
+      background: #10b981;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #059669;
+    }
+
+    .btn-danger {
+      background: #ef4444;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #dc2626;
+    }
+
+    .btn-secondary {
+      background: #6b7280;
+      color: white;
+    }
+
+    .btn-secondary:hover {
+      background: #4b5563;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .test-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #e1e5e9;
+      border-radius: 6px;
+      background: white;
+    }
+
+    .test-item {
+      padding: 10px;
+      border-bottom: 1px solid #f1f3f4;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .test-item:last-child {
+      border-bottom: none;
+    }
+
+    .test-name {
+      font-weight: 500;
+      color: #1f2937;
+    }
+
+    .test-actions {
+      display: flex;
+      gap: 5px;
+    }
+
+    .test-actions button {
+      padding: 4px 8px;
+      font-size: 12px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 20px;
+      color: #6b7280;
+      font-style: italic;
+    }
+
+    .input-group {
+      margin-bottom: 15px;
+    }
+
+    .input-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+      color: #374151;
+    }
+
+    .input-group input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+
+    .input-group input:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>E2E Test Recorder</h1>
+  </div>
+
+  <div id="status" class="status idle">
+    Ready to record
+  </div>
+
+  <div class="input-group">
+    <label for="testName">Test Name:</label>
+    <input type="text" id="testName" placeholder="Enter test name...">
+  </div>
+
+  <div class="controls">
+    <button id="startRecording" class="btn-primary">Start Recording</button>
+    <button id="stopRecording" class="btn-danger" disabled>Stop Recording</button>
+    <button id="importTests" class="btn-secondary">Import Tests</button>
+    <button id="exportAllTests" class="btn-secondary">Export All</button>
+    <button id="clearTests" class="btn-secondary">Clear All Tests</button>
+    <input type="file" id="fileInput" accept=".json" style="display: none;">
+  </div>
+
+  <div class="test-list" id="testList">
+    <div class="empty-state">
+      No tests recorded yet
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+/* E2E Test Recorder Content Styles */
+
+#e2e-recorder-overlay {
+  position: fixed !important;
+  top: 10px !important;
+  right: 10px !important;
+  background: #1f2937 !important;
+  color: white !important;
+  padding: 10px 15px !important;
+  border-radius: 6px !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  font-size: 14px !important;
+  z-index: 2147483647 !important;
+  display: none !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+  font-weight: 500 !important;
+  border: 2px solid rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(10px) !important;
+  max-width: 300px !important;
+  word-wrap: break-word !important;
+}
+
+/* Prevent conflicts with page styles */
+#e2e-recorder-overlay * {
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Element highlighting during recording */
+.e2e-recording-highlight {
+  outline: 2px solid #3b82f6 !important;
+  outline-offset: 1px !important;
+  background-color: rgba(59, 130, 246, 0.1) !important;
+}
+
+/* Element highlighting during replay */
+.e2e-replay-highlight {
+  outline: 2px solid #10b981 !important;
+  outline-offset: 1px !important;
+  background-color: rgba(16, 185, 129, 0.1) !important;
+  animation: e2e-pulse 0.5s ease-in-out !important;
+}
+
+@keyframes e2e-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+  70% {
+    transform: scale(1.02);
+    box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+/* Tooltip styles */
+.e2e-tooltip {
+  position: absolute !important;
+  background: #10b981 !important;
+  color: white !important;
+  padding: 4px 8px !important;
+  border-radius: 4px !important;
+  font-size: 12px !important;
+  z-index: 2147483646 !important;
+  pointer-events: none !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  font-weight: 500 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+  white-space: nowrap !important;
+}
+
+/* Hide overlay when printing */
+@media print {
+  #e2e-recorder-overlay {
+    display: none !important;
+  }
+}

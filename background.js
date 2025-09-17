@@ -1,0 +1,315 @@
+class E2EBackgroundScript {
+  constructor() {
+    this.init();
+  }
+
+  init() {
+    this.setupInstallListener();
+    this.setupTabUpdateListener();
+    this.setupCommandListener();
+    this.setupContextMenu();
+  }
+
+  setupInstallListener() {
+    chrome.runtime.onInstalled.addListener((details) => {
+      if (details.reason === 'install') {
+        console.log('E2E Test Recorder installed');
+        this.initializeStorage();
+      } else if (details.reason === 'update') {
+        console.log('E2E Test Recorder updated');
+        this.migrateData();
+      }
+    });
+  }
+
+  setupTabUpdateListener() {
+    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+      if (changeInfo.status === 'complete' && tab.url) {
+        this.injectContentScript(tabId);
+      }
+    });
+  }
+
+  setupCommandListener() {
+    chrome.commands.onCommand.addListener((command) => {
+      switch (command) {
+        case 'toggle-recording':
+          this.toggleRecording();
+          break;
+        case 'quick-replay':
+          this.quickReplay();
+          break;
+      }
+    });
+  }
+
+  setupContextMenu() {
+    chrome.contextMenus.create({
+      id: 'e2e-record-element',
+      title: 'Record this element',
+      contexts: ['all']
+    });
+
+    chrome.contextMenus.create({
+      id: 'e2e-generate-selector',
+      title: 'Generate selector',
+      contexts: ['all']
+    });
+
+    chrome.contextMenus.onClicked.addListener((info, tab) => {
+      switch (info.menuItemId) {
+        case 'e2e-record-element':
+          this.recordElement(tab.id);
+          break;
+        case 'e2e-generate-selector':
+          this.generateSelector(tab.id);
+          break;
+      }
+    });
+  }
+
+  async initializeStorage() {
+    const defaultData = {
+      e2eTests: [],
+      settings: {
+        recordingDelay: 100,
+        replayDelay: 500,
+        highlightElements: true,
+        autoScroll: true
+      }
+    };
+
+    await chrome.storage.local.set(defaultData);
+  }
+
+  async migrateData() {
+    const result = await chrome.storage.local.get();
+
+    if (!result.settings) {
+      await chrome.storage.local.set({
+        settings: {
+          recordingDelay: 100,
+          replayDelay: 500,
+          highlightElements: true,
+          autoScroll: true
+        }
+      });
+    }
+  }
+
+  async injectContentScript(tabId) {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        files: ['content.js']
+      });
+
+      await chrome.scripting.insertCSS({
+        target: { tabId: tabId },
+        files: ['content.css']
+      });
+    } catch (error) {
+      console.log('Could not inject content script:', error);
+    }
+  }
+
+  async toggleRecording() {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab) {
+      chrome.tabs.sendMessage(tab.id, { action: 'toggleRecording' });
+    }
+  }
+
+  async quickReplay() {
+    const result = await chrome.storage.local.get(['e2eTests']);
+    const tests = result.e2eTests || [];
+
+    if (tests.length > 0) {
+      const lastTest = tests[tests.length - 1];
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+      if (tab) {
+        chrome.tabs.sendMessage(tab.id, {
+          action: 'replayTest',
+          test: lastTest
+        });
+      }
+    }
+  }
+
+  async recordElement(tabId) {
+    chrome.tabs.sendMessage(tabId, { action: 'recordClickedElement' });
+  }
+
+  async generateSelector(tabId) {
+    chrome.tabs.sendMessage(tabId, { action: 'generateSelectorForElement' });
+  }
+
+  async exportAllTests() {
+    const result = await chrome.storage.local.get(['e2eTests']);
+    const tests = result.e2eTests || [];
+
+    const exportData = {
+      format: 'e2e-test-recorder',
+      version: '1.0.0',
+      exportDate: new Date().toISOString(),
+      tests: tests
+    };
+
+    return exportData;
+  }
+
+  async importTests(importData) {
+    if (importData.format !== 'e2e-test-recorder') {
+      throw new Error('Invalid import format');
+    }
+
+    const result = await chrome.storage.local.get(['e2eTests']);
+    const existingTests = result.e2eTests || [];
+
+    const mergedTests = [...existingTests, ...importData.tests];
+    await chrome.storage.local.set({ e2eTests: mergedTests });
+
+    return mergedTests.length - existingTests.length;
+  }
+
+  async generateTestCode(test, format = 'playwright') {
+    let code = '';
+
+    switch (format) {
+      case 'playwright':
+        code = this.generatePlaywrightCode(test);
+        break;
+      case 'cypress':
+        code = this.generateCypressCode(test);
+        break;
+      case 'selenium':
+        code = this.generateSeleniumCode(test);
+        break;
+      default:
+        throw new Error('Unsupported format');
+    }
+
+    return code;
+  }
+
+  generatePlaywrightCode(test) {
+    let code = `// Generated by E2E Test Recorder\n`;
+    code += `// Test: ${test.name}\n`;
+    code += `// Generated on: ${new Date().toISOString()}\n\n`;
+    code += `import { test, expect } from '@playwright/test';\n\n`;
+    code += `test('${test.name}', async ({ page }) => {\n`;
+    code += `  await page.goto('${test.url}');\n\n`;
+
+    test.steps.forEach((step, index) => {
+      code += `  // Step ${index + 1}\n`;
+
+      switch (step.type) {
+        case 'click':
+          code += `  await page.click('${step.selector}');\n`;
+          break;
+        case 'input':
+          code += `  await page.fill('${step.selector}', '${step.value}');\n`;
+          break;
+        case 'change':
+          if (typeof step.value === 'boolean') {
+            code += `  await page.setChecked('${step.selector}', ${step.value});\n`;
+          } else {
+            code += `  await page.selectOption('${step.selector}', '${step.value}');\n`;
+          }
+          break;
+        case 'keypress':
+          code += `  await page.press('${step.selector}', '${step.key}');\n`;
+          break;
+      }
+      code += '\n';
+    });
+
+    code += '});';
+    return code;
+  }
+
+  generateCypressCode(test) {
+    let code = `// Generated by E2E Test Recorder\n`;
+    code += `// Test: ${test.name}\n`;
+    code += `// Generated on: ${new Date().toISOString()}\n\n`;
+    code += `describe('${test.name}', () => {\n`;
+    code += `  it('should execute recorded steps', () => {\n`;
+    code += `    cy.visit('${test.url}');\n\n`;
+
+    test.steps.forEach((step, index) => {
+      code += `    // Step ${index + 1}\n`;
+
+      switch (step.type) {
+        case 'click':
+          code += `    cy.get('${step.selector}').click();\n`;
+          break;
+        case 'input':
+          code += `    cy.get('${step.selector}').type('${step.value}');\n`;
+          break;
+        case 'change':
+          if (typeof step.value === 'boolean') {
+            code += `    cy.get('${step.selector}').${step.value ? 'check' : 'uncheck'}();\n`;
+          } else {
+            code += `    cy.get('${step.selector}').select('${step.value}');\n`;
+          }
+          break;
+        case 'keypress':
+          code += `    cy.get('${step.selector}').type('{${step.key.toLowerCase()}}');\n`;
+          break;
+      }
+      code += '\n';
+    });
+
+    code += '  });\n});';
+    return code;
+  }
+
+  generateSeleniumCode(test) {
+    let code = `// Generated by E2E Test Recorder\n`;
+    code += `// Test: ${test.name}\n`;
+    code += `// Generated on: ${new Date().toISOString()}\n\n`;
+    code += `const { Builder, By, Key, until } = require('selenium-webdriver');\n\n`;
+    code += `async function ${test.name.replace(/[^a-zA-Z0-9]/g, '_')}() {\n`;
+    code += `  let driver = await new Builder().forBrowser('chrome').build();\n`;
+    code += `  try {\n`;
+    code += `    await driver.get('${test.url}');\n\n`;
+
+    test.steps.forEach((step, index) => {
+      code += `    // Step ${index + 1}\n`;
+
+      switch (step.type) {
+        case 'click':
+          code += `    await driver.findElement(By.css('${step.selector}')).click();\n`;
+          break;
+        case 'input':
+          code += `    await driver.findElement(By.css('${step.selector}')).sendKeys('${step.value}');\n`;
+          break;
+        case 'change':
+          if (typeof step.value === 'boolean') {
+            code += `    const checkbox = await driver.findElement(By.css('${step.selector}'));\n`;
+            code += `    if (await checkbox.isSelected() !== ${step.value}) {\n`;
+            code += `      await checkbox.click();\n`;
+            code += `    }\n`;
+          } else {
+            code += `    await driver.findElement(By.css('${step.selector}')).sendKeys('${step.value}');\n`;
+          }
+          break;
+        case 'keypress':
+          code += `    await driver.findElement(By.css('${step.selector}')).sendKeys(Key.${step.key.toUpperCase()});\n`;
+          break;
+      }
+      code += '\n';
+    });
+
+    code += '  } finally {\n';
+    code += '    await driver.quit();\n';
+    code += '  }\n';
+    code += '}\n\n';
+    code += `${test.name.replace(/[^a-zA-Z0-9]/g, '_')}();`;
+
+    return code;
+  }
+}
+
+new E2EBackgroundScript();
