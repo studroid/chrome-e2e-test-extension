@@ -877,34 +877,40 @@ class E2ETestRecorder {
 
       return `
         <div class="test-item ${isReplaying ? 'replaying' : ''}">
-          <div>
-            <div class="test-name">
-              ${isReplaying ? '<span class="replaying-indicator">▶</span> ' : ''}
-              ${this.escapeHtml(test.name)}
-              ${isReplaying ? ` <span class="replaying-label">(Running${progressInfo}...)</span>` : ''}
-            </div>
-            <div class="test-info">
-              <span style="font-size: 12px; color: #6b7280;">
+          <div class="test-header">
+            <div class="test-main-info">
+              <div class="test-name">
+                ${isReplaying ? '<span class="replaying-indicator">▶</span> ' : ''}
+                ${this.escapeHtml(test.name)}
+                ${isReplaying ? ` <span class="replaying-label">(Running${progressInfo}...)</span>` : ''}
+              </div>
+              <div class="test-meta">
                 ${test.steps.length} steps • ${new Date(test.timestamp).toLocaleDateString()}
                 ${screenshotCount > 0 ? ` • ${screenshotCount} screenshots` : ''}
-              </span>
-              <button class="btn-steps" data-action="toggleSteps" data-index="${index}">
-                ${isExpanded ? '▲ Hide Steps' : '▼ Show Steps'}
+              </div>
+            </div>
+            <div class="test-actions">
+              <button class="btn-primary" data-action="replay" data-index="${index}" ${isReplaying ? 'disabled' : ''}>
+                ${isReplaying ? `Running${progressInfo}...` : 'Replay'}
+              </button>
+              <button class="btn-secondary" data-action="export" data-index="${index}">
+                Export
+              </button>
+              <button class="btn-danger" data-action="delete" data-index="${index}" ${isReplaying ? 'disabled' : ''}>
+                Delete
               </button>
             </div>
-            ${screenshotsHtml}
-            ${stepsHtml}
           </div>
-          <div class="test-actions">
-            <button class="btn-primary" data-action="replay" data-index="${index}" ${isReplaying ? 'disabled' : ''}>
-              ${isReplaying ? `Running${progressInfo}...` : 'Replay'}
-            </button>
-            <button class="btn-secondary" data-action="export" data-index="${index}">
-              Export
-            </button>
-            <button class="btn-danger" data-action="delete" data-index="${index}" ${isReplaying ? 'disabled' : ''}>
-              Delete
-            </button>
+          <div class="test-content">
+            ${screenshotsHtml}
+            <div class="steps-toggle-area">
+              <button class="btn-steps-wide" data-action="toggleSteps" data-index="${index}">
+                <span class="steps-icon">${isExpanded ? '▲' : '▼'}</span>
+                <span class="steps-text">${isExpanded ? 'Hide' : 'Show'} Steps (${test.steps.length})</span>
+                ${isReplaying ? `<span class="steps-progress">Current: ${this.currentReplayingTest.currentStep || 0}/${test.steps.length}</span>` : ''}
+              </button>
+            </div>
+            ${stepsHtml}
           </div>
         </div>
       `;
