@@ -6,13 +6,29 @@ class E2EContentScript {
     this.recordedSteps = [];
     this.highlightedElement = null;
     this.overlay = null;
+    this.settings = {
+      recordingDelay: 100,
+      replayDelay: 300
+    };
     this.init();
   }
 
   async init() {
     this.setupMessageListener();
     this.createOverlay();
+    await this.loadSettings();
     await this.checkRecordingState();
+  }
+
+  async loadSettings() {
+    try {
+      const result = await chrome.storage.local.get(['settings']);
+      if (result.settings) {
+        this.settings = { ...this.settings, ...result.settings };
+      }
+    } catch (error) {
+      console.log('Could not load settings, using defaults:', error);
+    }
   }
 
   async checkRecordingState() {
@@ -44,6 +60,11 @@ class E2EContentScript {
         case 'replayTest':
           this.replayTest(message.test);
           break;
+        case 'captureFullPageScreenshot':
+          this.captureFullPageScreenshot()
+            .then(screenshot => sendResponse({ screenshot }))
+            .catch(error => sendResponse({ error: error.message }));
+          return true; // Keep message channel open for async response
       }
       sendResponse({ success: true });
     });
@@ -81,6 +102,76 @@ class E2EContentScript {
     this.setupRecordingListeners();
   }
 
+  async captureFullPageScreenshot() {
+    try {
+      // Show progress overlay
+      this.showScreenshotProgress('Capturing screenshot...');
+
+      // Simply capture the current viewport for now
+      const screenshot = await this.captureScreenshot();
+
+      // Hide progress overlay
+      this.hideScreenshotProgress();
+
+      if (!screenshot) {
+        throw new Error('Failed to capture viewport screenshot');
+      }
+
+      return screenshot;
+
+    } catch (error) {
+      this.hideScreenshotProgress();
+      console.error('Screenshot capture error:', error);
+      throw error;
+    }
+  }
+
+  drawImageOnCanvas(ctx, imageDataUrl, x, y) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, x, y);
+        resolve();
+      };
+      img.src = imageDataUrl;
+    });
+  }
+
+  showScreenshotProgress(message) {
+    if (!this.progressOverlay) {
+      this.progressOverlay = document.createElement('div');
+      this.progressOverlay.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 20px 30px;
+        border-radius: 8px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 16px;
+        z-index: 2147483647;
+        text-align: center;
+      `;
+      document.body.appendChild(this.progressOverlay);
+    }
+    this.progressOverlay.textContent = message;
+    this.progressOverlay.style.display = 'block';
+  }
+
+  updateScreenshotProgress(message) {
+    if (this.progressOverlay) {
+      this.progressOverlay.textContent = message;
+    }
+  }
+
+  hideScreenshotProgress() {
+    if (this.progressOverlay) {
+      this.progressOverlay.style.display = 'none';
+    }
+  }
+
   stopRecording() {
     this.isRecording = false;
     this.overlay.style.display = 'none';
@@ -107,7 +198,7 @@ class E2EContentScript {
     document.removeEventListener('keydown', this.handleKeyDown, true);
   }
 
-  handleClick = (event) => {
+  handleClick = async (event) => {
     if (!this.isRecording) return;
 
     event.preventDefault();
@@ -116,45 +207,91 @@ class E2EContentScript {
     const element = event.target;
     const selector = this.generateSelector(element);
 
+    // Store current scroll position before scrolling
+    const originalScrollX = window.scrollX;
+    const originalScrollY = window.scrollY;
+
+    // Scroll element into view for better visibility (same as replay behavior)
+    element.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+      inline: 'center'
+    });
+
+    // Wait a moment for scroll to complete
+    await this.delay(this.settings.recordingDelay);
+
+    // Get new scroll position after scrolling
+    const newScrollX = window.scrollX;
+    const newScrollY = window.scrollY;
+
     this.recordStep({
       type: 'click',
       selector: selector,
       text: element.textContent?.trim() || '',
       timestamp: Date.now(),
-      url: window.location.href
+      url: window.location.href,
+      scrollPosition: {
+        before: { x: originalScrollX, y: originalScrollY },
+        after: { x: newScrollX, y: newScrollY }
+      }
     });
 
-    this.showTemporaryHighlight(element, 'Click recorded');
+    this.showTemporaryHighlight(element, 'Click recorded + scrolled');
   }
 
-  handleInput = (event) => {
+  handleInput = async (event) => {
     if (!this.isRecording) return;
 
     const element = event.target;
     const selector = this.generateSelector(element);
+
+    // Scroll input element into view for better visibility
+    element.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+      inline: 'center'
+    });
 
     this.recordStep({
       type: 'input',
       selector: selector,
       value: element.value,
       timestamp: Date.now(),
-      url: window.location.href
+      url: window.location.href,
+      scrollPosition: {
+        x: window.scrollX,
+        y: window.scrollY
+      }
     });
   }
 
-  handleChange = (event) => {
+  handleChange = async (event) => {
     if (!this.isRecording) return;
 
     const element = event.target;
     if (element.type === 'checkbox' || element.type === 'radio' || element.tagName === 'SELECT') {
       const selector = this.generateSelector(element);
 
+      // Scroll element into view for better visibility
+      element.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+        inline: 'center'
+      });
+
+      await this.delay(this.settings.recordingDelay); // Short delay for scroll
+
       this.recordStep({
         type: 'change',
         selector: selector,
         value: element.type === 'checkbox' ? element.checked : element.value,
         timestamp: Date.now(),
-        url: window.location.href
+        url: window.location.href,
+        scrollPosition: {
+          x: window.scrollX,
+          y: window.scrollY
+        }
       });
     }
   }
@@ -292,6 +429,70 @@ class E2EContentScript {
     console.log('Step recorded:', step);
   }
 
+  async captureScreenshot() {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: 'captureScreenshot'
+      });
+
+      console.log('Background script response:', response);
+
+      if (response && response.dataUrl) {
+        return response.dataUrl;
+      } else if (response && response.error) {
+        throw new Error(`Background script error: ${response.error}`);
+      } else {
+        throw new Error('No dataUrl in response');
+      }
+    } catch (error) {
+      console.error('Screenshot capture failed:', error);
+      throw error;
+    }
+  }
+
+  async captureElementScreenshot(element) {
+    try {
+      // Scroll element into view
+      element.scrollIntoView({ behavior: 'auto', block: 'center' });
+      await this.delay(100);
+
+      const rect = element.getBoundingClientRect();
+      const screenshot = await this.captureScreenshot();
+
+      if (!screenshot) return null;
+
+      // Crop the screenshot to the element bounds
+      return await this.cropScreenshot(screenshot, rect);
+    } catch (error) {
+      console.error('Element screenshot capture failed:', error);
+      return null;
+    }
+  }
+
+  async cropScreenshot(screenshotDataUrl, rect) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Set canvas size to element size
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+
+        // Draw the cropped portion
+        ctx.drawImage(
+          img,
+          rect.left, rect.top, rect.width, rect.height,
+          0, 0, rect.width, rect.height
+        );
+
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.src = screenshotDataUrl;
+    });
+  }
+
   async saveRecordedSteps() {
     await chrome.storage.local.set({
       [`recording_${this.currentTestName}`]: this.recordedSteps
@@ -310,7 +511,7 @@ class E2EContentScript {
       for (let i = 0; i < test.steps.length; i++) {
         const step = test.steps[i];
         await this.executeStep(step, i + 1, test.steps.length);
-        await this.delay(500);
+        await this.delay(this.settings.replayDelay);
       }
 
       this.overlay.textContent = `✓ Replay completed: ${test.name}`;
@@ -341,9 +542,20 @@ class E2EContentScript {
       throw new Error(`Element not found: ${step.selector}`);
     }
 
+    // Ensure element is visible and scroll is complete first
+    await this.scrollToElementAndWait(element);
+
+    // Now highlight the element when it's visible
     this.highlightElement(element);
-    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    await this.delay(300);
+
+    // Capture current screenshot for visual comparison
+    let visualDiff = null;
+    if (step.screenshot) {
+      const currentScreenshot = await this.captureElementScreenshot(element);
+      if (currentScreenshot) {
+        visualDiff = await this.compareScreenshots(step.screenshot, currentScreenshot);
+      }
+    }
 
     switch (step.type) {
       case 'click':
@@ -368,11 +580,257 @@ class E2EContentScript {
         break;
     }
 
+    // Show visual diff if there's a significant difference
+    if (visualDiff && visualDiff.differencePercentage > 5) {
+      const userChoice = await this.showVisualDiff(visualDiff, step, currentStep);
+      if (userChoice === 'stop') {
+        throw new Error(`Visual regression test failed at step ${currentStep}`);
+      }
+    }
+
+    // Keep highlight visible briefly after action
+    await this.delay(200); // Fixed short delay for highlight visibility
     this.clearHighlight();
   }
 
   delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async scrollToElementAndWait(element) {
+    return new Promise((resolve) => {
+      const rect = element.getBoundingClientRect();
+      const isInViewport = (
+        rect.top >= 0 &&
+        rect.left >= 0 &&
+        rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+        rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+      );
+
+      if (isInViewport) {
+        // Element is already visible, no need to scroll
+        resolve();
+        return;
+      }
+
+      // Store initial scroll position
+      const initialScrollY = window.scrollY;
+      const initialScrollX = window.scrollX;
+
+      // Start scrolling
+      element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+
+      // Wait for scroll to complete
+      const checkScroll = () => {
+        const currentScrollY = window.scrollY;
+        const currentScrollX = window.scrollX;
+
+        // Check if scroll has stopped (position hasn't changed for a bit)
+        setTimeout(() => {
+          if (Math.abs(window.scrollY - currentScrollY) < 1 && Math.abs(window.scrollX - currentScrollX) < 1) {
+            // Scroll has stopped, check if element is now visible
+            const newRect = element.getBoundingClientRect();
+            const isNowVisible = (
+              newRect.top >= 0 &&
+              newRect.left >= 0 &&
+              newRect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+              newRect.right <= (window.innerWidth || document.documentElement.clientWidth)
+            );
+
+            if (isNowVisible || Math.abs(initialScrollY - window.scrollY) > 0 || Math.abs(initialScrollX - window.scrollX) > 0) {
+              // Element is visible or we've scrolled (even if not perfectly visible)
+              resolve();
+            } else {
+              // Try again
+              checkScroll();
+            }
+          } else {
+            // Still scrolling, check again
+            checkScroll();
+          }
+        }, 100);
+      };
+
+      checkScroll();
+    });
+  }
+
+  async compareScreenshots(baselineDataUrl, currentDataUrl) {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      const baselineImg = new Image();
+      const currentImg = new Image();
+
+      let loadedCount = 0;
+
+      const processImages = () => {
+        if (loadedCount !== 2) return;
+
+        const width = Math.max(baselineImg.width, currentImg.width);
+        const height = Math.max(baselineImg.height, currentImg.height);
+
+        canvas.width = width;
+        canvas.height = height;
+
+        // Draw baseline image
+        ctx.drawImage(baselineImg, 0, 0);
+        const baselineData = ctx.getImageData(0, 0, width, height);
+
+        // Clear and draw current image
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(currentImg, 0, 0);
+        const currentData = ctx.getImageData(0, 0, width, height);
+
+        // Create diff image
+        const diffData = ctx.createImageData(width, height);
+        let diffPixels = 0;
+        const totalPixels = width * height;
+
+        for (let i = 0; i < baselineData.data.length; i += 4) {
+          const rDiff = Math.abs(baselineData.data[i] - currentData.data[i]);
+          const gDiff = Math.abs(baselineData.data[i + 1] - currentData.data[i + 1]);
+          const bDiff = Math.abs(baselineData.data[i + 2] - currentData.data[i + 2]);
+
+          const diff = (rDiff + gDiff + bDiff) / 3;
+
+          if (diff > 10) { // Threshold for significant difference
+            diffPixels++;
+            diffData.data[i] = 255;     // Red
+            diffData.data[i + 1] = 0;   // Green
+            diffData.data[i + 2] = 0;   // Blue
+            diffData.data[i + 3] = 128; // Alpha
+          } else {
+            diffData.data[i] = currentData.data[i];
+            diffData.data[i + 1] = currentData.data[i + 1];
+            diffData.data[i + 2] = currentData.data[i + 2];
+            diffData.data[i + 3] = 50; // Lower alpha for unchanged areas
+          }
+        }
+
+        // Draw diff image
+        ctx.clearRect(0, 0, width, height);
+        ctx.putImageData(diffData, 0, 0);
+        const diffDataUrl = canvas.toDataURL('image/png');
+
+        const differencePercentage = (diffPixels / totalPixels) * 100;
+
+        resolve({
+          baseline: baselineDataUrl,
+          current: currentDataUrl,
+          diff: diffDataUrl,
+          differencePercentage: differencePercentage,
+          diffPixels: diffPixels,
+          totalPixels: totalPixels
+        });
+      };
+
+      baselineImg.onload = () => {
+        loadedCount++;
+        processImages();
+      };
+
+      currentImg.onload = () => {
+        loadedCount++;
+        processImages();
+      };
+
+      baselineImg.src = baselineDataUrl;
+      currentImg.src = currentDataUrl;
+    });
+  }
+
+  showVisualDiff(visualDiff, step, stepNumber) {
+    // Create visual diff overlay
+    const diffOverlay = document.createElement('div');
+    diffOverlay.id = 'e2e-visual-diff-overlay';
+    diffOverlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 2147483647;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `;
+
+    const diffModal = document.createElement('div');
+    diffModal.style.cssText = `
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      max-width: 90%;
+      max-height: 90%;
+      overflow: auto;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    `;
+
+    diffModal.innerHTML = `
+      <div style="margin-bottom: 15px;">
+        <h3 style="margin: 0 0 10px 0; color: #dc2626;">Visual Regression Detected</h3>
+        <p style="margin: 0; color: #6b7280;">
+          Step ${stepNumber}: ${step.type} on "${step.selector}"<br>
+          Difference: ${visualDiff.differencePercentage.toFixed(2)}%
+          (${visualDiff.diffPixels.toLocaleString()} pixels changed)
+        </p>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+        <div>
+          <h4 style="margin: 0 0 10px 0; text-align: center;">Baseline</h4>
+          <img src="${visualDiff.baseline}" style="width: 100%; border: 1px solid #e5e7eb; border-radius: 4px;">
+        </div>
+        <div>
+          <h4 style="margin: 0 0 10px 0; text-align: center;">Current</h4>
+          <img src="${visualDiff.current}" style="width: 100%; border: 1px solid #e5e7eb; border-radius: 4px;">
+        </div>
+        <div>
+          <h4 style="margin: 0 0 10px 0; text-align: center;">Diff</h4>
+          <img src="${visualDiff.diff}" style="width: 100%; border: 1px solid #e5e7eb; border-radius: 4px;">
+        </div>
+      </div>
+
+      <div style="text-align: center;">
+        <button id="continue-test" style="
+          background: #10b981;
+          color: white;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 6px;
+          margin-right: 10px;
+          cursor: pointer;
+        ">Continue Test</button>
+        <button id="stop-test" style="
+          background: #dc2626;
+          color: white;
+          border: none;
+          padding: 10px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+        ">Stop Test</button>
+      </div>
+    `;
+
+    diffOverlay.appendChild(diffModal);
+    document.body.appendChild(diffOverlay);
+
+    // Add event listeners
+    return new Promise((resolve) => {
+      document.getElementById('continue-test').addEventListener('click', () => {
+        document.body.removeChild(diffOverlay);
+        resolve('continue');
+      });
+
+      document.getElementById('stop-test').addEventListener('click', () => {
+        document.body.removeChild(diffOverlay);
+        resolve('stop');
+      });
+    });
   }
 }
 
