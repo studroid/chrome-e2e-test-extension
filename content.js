@@ -1116,9 +1116,9 @@ class E2EContentScript {
     // Set replaying state with timeout protection
     this.isReplaying = true;
     this.currentReplayTimeout = setTimeout(() => {
-      console.error('🚨 Test replay timed out after 60 seconds, forcing state reset');
+      console.error('🚨 Test replay timed out after 10 seconds, forcing state reset');
       this.forceResetReplayState();
-    }, 60000); // 60 second timeout
+    }, 10000); // 10 second timeout
 
     this.overlay.textContent = `Replaying: ${test.name}`;
     this.overlay.style.display = 'block';
