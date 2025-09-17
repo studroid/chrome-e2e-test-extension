@@ -81,6 +81,12 @@ class E2EContentScript {
           // Simple ping to verify content script is alive and responsive
           sendResponse({ success: true, message: 'Content script is ready' });
           break;
+        case 'forceReset':
+          // Emergency force reset
+          console.log('🚨 Received force reset command');
+          this.forceResetReplayState();
+          sendResponse({ success: true, message: 'State forcefully reset' });
+          break;
         case 'startRecording':
           this.startRecording(message.testName);
           break;
@@ -1100,9 +1106,20 @@ class E2EContentScript {
   }
 
   async replayTest(test) {
-    if (this.isReplaying) return;
+    if (this.isReplaying) {
+      console.warn('⚠️ Test already in progress, ignoring duplicate request');
+      return;
+    }
 
+    console.log(`🎬 Starting test replay: "${test.name}"`);
+
+    // Set replaying state with timeout protection
     this.isReplaying = true;
+    this.currentReplayTimeout = setTimeout(() => {
+      console.error('🚨 Test replay timed out after 60 seconds, forcing state reset');
+      this.forceResetReplayState();
+    }, 60000); // 60 second timeout
+
     this.overlay.textContent = `Replaying: ${test.name}`;
     this.overlay.style.display = 'block';
     this.overlay.style.background = '#1d4ed8';
@@ -1119,15 +1136,21 @@ class E2EContentScript {
         await this.saveTestExecutionState(test, 0, startTime);
 
         window.location.href = test.startUrl;
-        // Navigation will interrupt execution here
+        // Navigation will interrupt execution here - state will be managed by background script
         return;
       }
       // Execute test steps from the beginning
       await this.executeTestSteps(test, 0, startTime);
 
     } catch (error) {
-      console.error('Replay failed:', error);
+      console.error('❌ Replay failed:', error);
       this.handleTestFailure(test, error, startTime);
+    } finally {
+      // Always clear timeout when test completes (success or failure)
+      if (this.currentReplayTimeout) {
+        clearTimeout(this.currentReplayTimeout);
+        this.currentReplayTimeout = null;
+      }
     }
   }
 
@@ -1168,14 +1191,43 @@ class E2EContentScript {
     }
   }
 
+  // Force reset replay state - used for recovery
+  forceResetReplayState() {
+    console.log('🔄 Force resetting replay state');
+    this.isReplaying = false;
+    if (this.currentReplayTimeout) {
+      clearTimeout(this.currentReplayTimeout);
+      this.currentReplayTimeout = null;
+    }
+    if (this.overlay) {
+      this.overlay.style.display = 'none';
+    }
+    // Clear any pending execution state
+    try {
+      chrome.runtime.sendMessage({ action: 'clearTestExecutionState' });
+    } catch (error) {
+      console.warn('Failed to clear execution state during force reset:', error);
+    }
+  }
+
   async executeTestSteps(test, startStepIndex, startTime) {
     // Handle both old format (direct array) and new format (object with steps property)
     const steps = Array.isArray(test) ? test : (test.steps || test);
     const testName = test.name || 'Unnamed Test';
 
+    console.log(`🎬 Executing ${steps.length} steps for "${testName}" starting from step ${startStepIndex}`);
+
     try {
       for (let i = startStepIndex; i < steps.length; i++) {
         const step = steps[i];
+
+        // Check if test execution was cancelled
+        if (!this.isReplaying) {
+          console.log('🛑 Test execution was cancelled');
+          return;
+        }
+
+        console.log(`📍 Executing step ${i + 1}/${steps.length}: ${step.type}`);
 
         // Save progress before each step (in case of navigation)
         await this.saveTestExecutionState(test, i + 1, startTime);
@@ -1190,28 +1242,56 @@ class E2EContentScript {
       }
 
       // Test completed successfully
-      this.overlay.textContent = `✓ Replay completed: ${testName}`;
-      this.overlay.style.background = '#10b981';
-
-      const duration = Date.now() - startTime;
-      this.showTestResult(true, testName, steps.length, null, duration);
-
-      // Clear execution state
-      await chrome.runtime.sendMessage({ action: 'clearTestExecutionState' });
-
-      setTimeout(() => {
-        this.overlay.style.display = 'none';
-        this.isReplaying = false;
-      }, 2000);
+      console.log(`✅ All steps completed for "${testName}"`);
+      await this.handleTestSuccess(testName, steps.length, startTime);
 
     } catch (error) {
+      console.error(`💥 Test execution failed at step: ${error.message}`);
       throw error; // Re-throw to be handled by caller
     }
+  }
+
+  async handleTestSuccess(testName, totalSteps, startTime) {
+    this.overlay.textContent = `✓ Replay completed: ${testName}`;
+    this.overlay.style.background = '#10b981';
+
+    const duration = Date.now() - startTime;
+    this.showTestResult(true, testName, totalSteps, null, duration);
+
+    console.log(`✅ Test "${testName}" completed successfully in ${duration}ms`);
+
+    // Clean up immediately
+    await this.cleanupTestExecution();
+  }
+
+  async cleanupTestExecution() {
+    try {
+      await chrome.runtime.sendMessage({ action: 'clearTestExecutionState' });
+      console.log('🧹 Test execution state cleaned up');
+    } catch (error) {
+      console.warn('Failed to clear execution state:', error);
+    }
+
+    // Reset state immediately instead of using setTimeout
+    this.isReplaying = false;
+    if (this.currentReplayTimeout) {
+      clearTimeout(this.currentReplayTimeout);
+      this.currentReplayTimeout = null;
+    }
+
+    // Hide overlay after brief delay for visual feedback
+    setTimeout(() => {
+      if (this.overlay) {
+        this.overlay.style.display = 'none';
+      }
+    }, 2000);
   }
 
   handleTestFailure(test, error, startTime) {
     const steps = Array.isArray(test) ? test : (test.steps || test);
     const testName = test.name || 'Unnamed Test';
+
+    console.error(`❌ Test "${testName}" failed:`, error);
 
     this.overlay.textContent = `✗ Replay failed: ${error.message}`;
     this.overlay.style.background = '#dc2626';
@@ -1223,13 +1303,33 @@ class E2EContentScript {
     const duration = Date.now() - startTime;
     this.showTestResult(false, testName, steps.length, error.message, duration);
 
-    // Clear execution state
-    chrome.runtime.sendMessage({ action: 'clearTestExecutionState' });
+    // Immediate cleanup on failure
+    this.cleanupTestExecutionSync();
 
+    // Show failure overlay slightly longer but reset state immediately
     setTimeout(() => {
-      this.overlay.style.display = 'none';
-      this.isReplaying = false;
+      if (this.overlay) {
+        this.overlay.style.display = 'none';
+      }
     }, 5000);
+  }
+
+  cleanupTestExecutionSync() {
+    console.log('🧹 Synchronous cleanup after test failure');
+
+    // Reset state immediately
+    this.isReplaying = false;
+    if (this.currentReplayTimeout) {
+      clearTimeout(this.currentReplayTimeout);
+      this.currentReplayTimeout = null;
+    }
+
+    // Clear execution state (fire and forget)
+    try {
+      chrome.runtime.sendMessage({ action: 'clearTestExecutionState' });
+    } catch (error) {
+      console.warn('Failed to clear execution state during sync cleanup:', error);
+    }
   }
 
   async executeStep(step, currentStep, totalSteps) {

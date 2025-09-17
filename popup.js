@@ -860,6 +860,33 @@ class E2ETestRecorder {
   delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
+
+  // Emergency force reset function
+  async forceResetTestState() {
+    console.log('🚨 Force resetting test state...');
+
+    try {
+      // Reset content script state
+      await this.sendMessageToActiveTab({
+        action: 'forceReset'
+      });
+
+      // Clear all stored execution states
+      await chrome.runtime.sendMessage({
+        action: 'clearTestExecutionState'
+      });
+
+      // Clear any recording state
+      await chrome.storage.local.remove(['recordingState']);
+
+      this.showNotification('⚠️ Test state forcefully reset!', 'warning');
+      console.log('✅ Force reset completed');
+
+    } catch (error) {
+      console.error('Force reset failed:', error);
+      this.showNotification('❌ Force reset failed: ' + error.message, 'error');
+    }
+  }
 }
 
 const recorder = new E2ETestRecorder();
