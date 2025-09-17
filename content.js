@@ -497,66 +497,376 @@ class E2EContentScript {
     }
   }
 
+  // Helper function to escape CSS special characters
+  escapeCssIdentifier(identifier) {
+    // Escape all CSS special characters for Tailwind and other frameworks
+    return identifier.replace(/[!"#$%&'()*+,./:;<=>?@[\\\]^`{|}~]/g, '\\$&');
+  }
+
+  // Test function for problematic selectors (for debugging)
+  testProblematicSelectors() {
+    console.log('🧪 Testing improved selector generation...');
+
+    const testCases = [
+      'ab-list-item-child list-item-child before:truncate before:max-w-[100%] slate-list-item-child',
+      'slate-editor ignore-click-outside/toolbar',
+      'flex flex-col xl:flex-1 md:items-center'
+    ];
+
+    testCases.forEach((testClass, index) => {
+      console.log(`Test ${index + 1}: "${testClass}"`);
+      try {
+        const escaped = this.escapeCssIdentifier(testClass);
+        console.log(`  Escaped: "${escaped}"`);
+        const selector = `.${escaped}`;
+        const isValid = this.isValidSelector(selector);
+        console.log(`  Valid: ${isValid}`);
+      } catch (error) {
+        console.error(`  Error: ${error.message}`);
+      }
+    });
+  }
+
+  // Helper function to validate CSS selector
+  isValidSelector(selector) {
+    try {
+      document.querySelector(selector);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Helper function to check if selector is unique
+  isUniqueSelector(selector) {
+    try {
+      return document.querySelectorAll(selector).length === 1;
+    } catch (e) {
+      return false;
+    }
+  }
+
   generateSelector(element) {
+    // Priority 1: ID (highest priority)
     if (element.id) {
-      return `#${element.id.replace(/:/g, '\\:')}`;
+      const idSelector = `#${this.escapeCssIdentifier(element.id)}`;
+      if (this.isValidSelector(idSelector) && this.isUniqueSelector(idSelector)) {
+        return idSelector;
+      }
     }
 
-    if (element.className) {
-      const classes = element.className.split(' ')
-        .filter(c => c.trim())
-        .map(c => c.replace(/:/g, '\\:')); // Escape colons for Tailwind CSS classes
+    // Priority 2: data-testid (very stable)
+    if (element.getAttribute('data-testid')) {
+      const testIdSelector = `[data-testid="${element.getAttribute('data-testid')}"]`;
+      if (this.isValidSelector(testIdSelector) && this.isUniqueSelector(testIdSelector)) {
+        return testIdSelector;
+      }
+    }
 
-      if (classes.length > 0) {
-        const selector = `.${classes.join('.')}`;
-        try {
-          if (document.querySelectorAll(selector).length === 1) {
-            return selector;
-          }
-        } catch (e) {
-          // If selector is still invalid, continue to next method
-          console.warn('Invalid class selector generated:', selector);
+    // Priority 3: name attribute (stable for form elements)
+    if (element.name) {
+      const nameSelector = `[name="${element.name}"]`;
+      if (this.isValidSelector(nameSelector) && this.isUniqueSelector(nameSelector)) {
+        return nameSelector;
+      }
+    }
+
+    // Priority 4: Try other stable attributes
+    const stableAttributes = ['data-cy', 'data-test', 'aria-label', 'role'];
+    for (const attr of stableAttributes) {
+      const value = element.getAttribute(attr);
+      if (value) {
+        const attrSelector = `[${attr}="${value}"]`;
+        if (this.isValidSelector(attrSelector) && this.isUniqueSelector(attrSelector)) {
+          return attrSelector;
         }
       }
     }
 
-    if (element.getAttribute('data-testid')) {
-      return `[data-testid="${element.getAttribute('data-testid')}"]`;
+    // Priority 5: Class names (with improved escaping)
+    if (element.className) {
+      const classes = element.className.split(' ')
+        .filter(c => c.trim())
+        .map(c => this.escapeCssIdentifier(c));
+
+      if (classes.length > 0) {
+        // Try all classes first
+        let classSelector = `.${classes.join('.')}`;
+        if (this.isValidSelector(classSelector) && this.isUniqueSelector(classSelector)) {
+          return classSelector;
+        }
+
+        // Try combinations of classes if full selector doesn't work
+        for (let i = Math.min(3, classes.length); i > 0; i--) {
+          for (let j = 0; j <= classes.length - i; j++) {
+            const selectedClasses = classes.slice(j, j + i);
+            classSelector = `.${selectedClasses.join('.')}`;
+            if (this.isValidSelector(classSelector) && this.isUniqueSelector(classSelector)) {
+              return classSelector;
+            }
+          }
+        }
+      }
     }
 
-    if (element.name) {
-      return `[name="${element.name}"]`;
+    // Priority 6: Tag with attributes combination
+    const tagName = element.tagName.toLowerCase();
+    const text = element.textContent?.trim();
+    if (text && text.length < 50) {
+      const textSelector = `${tagName}:contains("${text.replace(/"/g, '\\"')}")`;
+      if (this.isValidSelector(textSelector) && this.isUniqueSelector(textSelector)) {
+        return textSelector;
+      }
     }
 
+    // Priority 7: Generate parent-based selector (but limit depth)
+    return this.generateParentBasedSelector(element, 5);
+  }
+
+  // Enhanced element finding with retry and waiting mechanisms
+  async findElementWithRetry(selector, options = {}) {
+    const {
+      maxAttempts = 5,
+      waitBetweenAttempts = 1000,
+      waitForElement = true,
+      timeout = 10000
+    } = options;
+
+    console.log(`🔎 Searching for element: "${selector}" (max attempts: ${maxAttempts})`);
+
+    // First validate the selector
+    if (!this.isValidSelector(selector)) {
+      console.error(`❌ Invalid selector: "${selector}"`);
+      await this.debugSelector(selector);
+      return null;
+    }
+
+    let attempt = 0;
+    const startTime = Date.now();
+
+    while (attempt < maxAttempts && (Date.now() - startTime) < timeout) {
+      attempt++;
+
+      try {
+        console.log(`🔄 Attempt ${attempt}/${maxAttempts} for selector: "${selector}"`);
+
+        // Try to find the element
+        let element = document.querySelector(selector);
+
+        if (element) {
+          console.log(`✅ Element found on attempt ${attempt}`);
+
+          // If waitForElement is true, also check if element is visible and interactable
+          if (waitForElement) {
+            const isVisible = await this.waitForElementToBeVisible(element);
+            if (isVisible) {
+              return element;
+            } else {
+              console.log(`⏳ Element found but not visible yet, waiting...`);
+            }
+          } else {
+            return element;
+          }
+        } else {
+          console.log(`❌ Element not found on attempt ${attempt}`);
+
+          // Try alternative selectors if available
+          const alternativeElement = await this.tryAlternativeSelectors(selector);
+          if (alternativeElement) {
+            console.log(`✅ Element found using alternative selector`);
+            return alternativeElement;
+          }
+        }
+
+        // Wait before next attempt (except for last attempt)
+        if (attempt < maxAttempts) {
+          console.log(`⏳ Waiting ${waitBetweenAttempts}ms before next attempt...`);
+          await this.delay(waitBetweenAttempts);
+        }
+
+      } catch (error) {
+        console.error(`❌ Error during attempt ${attempt}:`, error);
+        if (attempt === maxAttempts) {
+          await this.debugSelector(selector);
+          return null;
+        }
+      }
+    }
+
+    console.error(`❌ Element not found after ${maxAttempts} attempts: "${selector}"`);
+    await this.debugSelector(selector);
+    return null;
+  }
+
+  async waitForElementToBeVisible(element, timeout = 5000) {
+    const startTime = Date.now();
+
+    while ((Date.now() - startTime) < timeout) {
+      const rect = element.getBoundingClientRect();
+      const isVisible = rect.width > 0 && rect.height > 0 &&
+                       window.getComputedStyle(element).visibility !== 'hidden' &&
+                       window.getComputedStyle(element).display !== 'none';
+
+      if (isVisible) {
+        return true;
+      }
+
+      await this.delay(100);
+    }
+
+    return false;
+  }
+
+  async tryAlternativeSelectors(originalSelector) {
+    // Try to generate alternative selectors based on the original
+    const alternatives = [];
+
+    try {
+      // If it's a complex selector, try simpler versions
+      if (originalSelector.includes(' > ')) {
+        const parts = originalSelector.split(' > ');
+        // Try just the last part
+        alternatives.push(parts[parts.length - 1]);
+        // Try without nth-child/nth-of-type
+        alternatives.push(parts[parts.length - 1].replace(/:nth-(child|of-type)\(\d+\)/, ''));
+      }
+
+      // If it contains nth-child/nth-of-type, try without it
+      if (originalSelector.includes(':nth-')) {
+        alternatives.push(originalSelector.replace(/:nth-(child|of-type)\(\d+\)/g, ''));
+      }
+
+      // If it's a class selector, try individual classes
+      if (originalSelector.startsWith('.') && originalSelector.includes('.') > 1) {
+        const classes = originalSelector.substring(1).split('.');
+        classes.forEach(cls => {
+          alternatives.push(`.${cls}`);
+        });
+      }
+
+      // Try each alternative
+      for (const altSelector of alternatives) {
+        if (this.isValidSelector(altSelector)) {
+          const elements = document.querySelectorAll(altSelector);
+          if (elements.length === 1) {
+            console.log(`🔄 Found element using alternative selector: "${altSelector}"`);
+            return elements[0];
+          } else if (elements.length > 1) {
+            console.log(`🔄 Multiple elements found for alternative selector: "${altSelector}" (${elements.length})`);
+            // Return first visible element
+            for (const el of elements) {
+              if (await this.waitForElementToBeVisible(el, 100)) {
+                return el;
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error trying alternative selectors:', error);
+    }
+
+    return null;
+  }
+
+  async debugSelector(selector) {
+    console.log('🔍 Debugging selector:', selector);
+
+    try {
+      // Check if selector contains ID
+      const idMatch = selector.match(/#([^.\s>]+)/);
+      if (idMatch) {
+        const id = idMatch[1];
+        console.log(`Looking for element with id="${id}"...`);
+        const elementById = document.getElementById(id);
+        console.log(`Element with id="${id}" ${elementById ? 'EXISTS' : 'NOT FOUND'}`);
+      }
+
+      // Check if selector contains class
+      const classMatches = selector.match(/\.([^.\s>#\[\]:]+)/g);
+      if (classMatches) {
+        classMatches.forEach(match => {
+          const className = match.substring(1); // Remove the dot
+          console.log(`Looking for elements with class="${className}"...`);
+          const elementsByClass = document.getElementsByClassName(className);
+          console.log(`Found ${elementsByClass.length} elements with class="${className}"`);
+        });
+      }
+
+      // Try to find similar elements for debugging
+      const tagMatch = selector.match(/^([a-zA-Z]+)/);
+      if (tagMatch) {
+        const tagName = tagMatch[1];
+        const similarElements = document.querySelectorAll(tagName);
+        console.log(`Found ${similarElements.length} <${tagName}> elements on page`);
+        similarElements.forEach((el, index) => {
+          if (index < 5) { // Show first 5
+            console.log(`  ${index + 1}. ${el.tagName} - id: ${el.id || 'none'} - class: ${el.className || 'none'}`);
+          }
+        });
+      }
+    } catch (debugError) {
+      console.warn('Debug analysis failed:', debugError);
+    }
+  }
+
+  generateParentBasedSelector(element, maxDepth = 5) {
     let path = [];
     let current = element;
+    let depth = 0;
 
-    while (current && current.nodeType === Node.ELEMENT_NODE) {
+    while (current && current.nodeType === Node.ELEMENT_NODE && depth < maxDepth) {
       let selector = current.nodeName.toLowerCase();
 
+      // Try to use ID if available
       if (current.id) {
-        selector += `#${current.id.replace(/:/g, '\\:')}`;
+        const idPart = this.escapeCssIdentifier(current.id);
+        selector += `#${idPart}`;
         path.unshift(selector);
         break;
       }
 
+      // Try to use a distinguishing class
+      if (current.className) {
+        const classes = current.className.split(' ')
+          .filter(c => c.trim())
+          .map(c => this.escapeCssIdentifier(c));
+
+        // Use first few classes to make selector more specific but not too fragile
+        if (classes.length > 0) {
+          const useClasses = classes.slice(0, Math.min(2, classes.length));
+          selector += `.${useClasses.join('.')}`;
+        }
+      }
+
+      // Only use nth-child for very specific cases and avoid high numbers
       let sibling = current;
       let nth = 1;
       while (sibling = sibling.previousElementSibling) {
-        if (sibling.nodeName.toLowerCase() === selector) {
+        if (sibling.nodeName.toLowerCase() === current.nodeName.toLowerCase()) {
           nth++;
         }
       }
 
-      if (nth > 1) {
-        selector += `:nth-of-type(${nth})`;
+      // Only add nth-child if it's a reasonable number and would be stable
+      if (nth > 1 && nth <= 10) {
+        selector += `:nth-child(${nth})`;
       }
 
       path.unshift(selector);
       current = current.parentNode;
+      depth++;
     }
 
-    return path.join(' > ');
+    const fullSelector = path.join(' > ');
+
+    // Validate the generated selector
+    if (!this.isValidSelector(fullSelector)) {
+      console.warn('Generated invalid selector, falling back to simple tag selector:', fullSelector);
+      return element.tagName.toLowerCase();
+    }
+
+    return fullSelector;
   }
 
   showTestResult(success, testName, totalSteps, errorMessage, duration = null) {
@@ -988,54 +1298,15 @@ class E2EContentScript {
 
     console.log(`🔍 Step ${currentStep}: ${step.type} on "${step.selector}"`);
 
-    let element;
-    try {
-      element = document.querySelector(step.selector);
-    } catch (selectorError) {
-      console.error(`❌ Invalid selector: "${step.selector}"`, selectorError);
-      throw new Error(`Invalid CSS selector: ${step.selector} - ${selectorError.message}`);
-    }
+    // Use improved element finding with retries and waiting
+    const element = await this.findElementWithRetry(step.selector, {
+      maxAttempts: 5,
+      waitBetweenAttempts: 1000,
+      waitForElement: true
+    });
 
     if (!element) {
-      console.error(`❌ Element not found for selector: "${step.selector}"`);
-      console.log('📋 Available elements that might match:');
-
-      // Try to find similar elements for debugging
-      try {
-        const tagName = step.selector.match(/^([a-zA-Z]+)/)?.[1];
-        if (tagName) {
-          const similarElements = document.querySelectorAll(tagName);
-          console.log(`Found ${similarElements.length} <${tagName}> elements on page`);
-          similarElements.forEach((el, index) => {
-            if (index < 5) { // Show first 5
-              console.log(`  ${index + 1}. ${el.tagName} - id: ${el.id || 'none'} - class: ${el.className || 'none'}`);
-            }
-          });
-        }
-
-        // Check if selector contains ID
-        const idMatch = step.selector.match(/#([^.\s>]+)/);
-        if (idMatch) {
-          const id = idMatch[1];
-          console.log(`Looking for element with id="${id}"...`);
-          const elementById = document.getElementById(id);
-          console.log(`Element with id="${id}" ${elementById ? 'EXISTS' : 'NOT FOUND'}`);
-        }
-
-        // Check if selector contains class
-        const classMatch = step.selector.match(/\.([^.\s>#]+)/);
-        if (classMatch) {
-          const className = classMatch[1];
-          console.log(`Looking for elements with class="${className}"...`);
-          const elementsByClass = document.getElementsByClassName(className);
-          console.log(`Found ${elementsByClass.length} elements with class="${className}"`);
-        }
-
-      } catch (debugError) {
-        console.warn('Debug analysis failed:', debugError);
-      }
-
-      throw new Error(`Element not found: ${step.selector}`);
+      throw new Error(`Element not found after retries: ${step.selector}`);
     }
 
     console.log(`✅ Element found: ${element.tagName}${element.id ? '#' + element.id : ''}`);
