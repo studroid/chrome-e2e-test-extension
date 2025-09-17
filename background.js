@@ -72,41 +72,45 @@ class E2EBackgroundScript {
   }
 
   setupCommandListener() {
-    chrome.commands.onCommand.addListener((command) => {
-      switch (command) {
-        case 'toggle-recording':
-          this.toggleRecording();
-          break;
-        case 'quick-replay':
-          this.quickReplay();
-          break;
-      }
-    });
+    if (chrome.commands && chrome.commands.onCommand) {
+      chrome.commands.onCommand.addListener((command) => {
+        switch (command) {
+          case 'toggle-recording':
+            this.toggleRecording();
+            break;
+          case 'quick-replay':
+            this.quickReplay();
+            break;
+        }
+      });
+    }
   }
 
   setupContextMenu() {
-    chrome.contextMenus.create({
-      id: 'e2e-record-element',
-      title: 'Record this element',
-      contexts: ['all']
-    });
+    if (chrome.contextMenus && chrome.contextMenus.create) {
+      chrome.contextMenus.create({
+        id: 'e2e-record-element',
+        title: 'Record this element',
+        contexts: ['all']
+      });
 
-    chrome.contextMenus.create({
-      id: 'e2e-generate-selector',
-      title: 'Generate selector',
-      contexts: ['all']
-    });
+      chrome.contextMenus.create({
+        id: 'e2e-generate-selector',
+        title: 'Generate selector',
+        contexts: ['all']
+      });
 
-    chrome.contextMenus.onClicked.addListener((info, tab) => {
-      switch (info.menuItemId) {
-        case 'e2e-record-element':
-          this.recordElement(tab.id);
-          break;
-        case 'e2e-generate-selector':
-          this.generateSelector(tab.id);
-          break;
-      }
-    });
+      chrome.contextMenus.onClicked.addListener((info, tab) => {
+        switch (info.menuItemId) {
+          case 'e2e-record-element':
+            this.recordElement(tab.id);
+            break;
+          case 'e2e-generate-selector':
+            this.generateSelector(tab.id);
+            break;
+        }
+      });
+    }
   }
 
   async initializeStorage() {
