@@ -1,3 +1,8 @@
+// Prevent multiple instances
+if (typeof window.E2EContentScript !== 'undefined') {
+  console.log('E2E Content Script already loaded, skipping...');
+} else {
+
 class E2EContentScript {
   constructor() {
     this.isRecording = false;
@@ -18,6 +23,11 @@ class E2EContentScript {
     this.createOverlay();
     await this.loadSettings();
     await this.checkRecordingState();
+
+    // Check for pending test execution after a short delay
+    setTimeout(() => {
+      this.checkPendingTestExecution();
+    }, 1500);
   }
 
   async loadSettings() {
@@ -48,6 +58,22 @@ class E2EContentScript {
     }
   }
 
+  async checkPendingTestExecution() {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: 'getTestExecutionState'
+      });
+
+      if (response && response.state) {
+        console.log('🔍 Found pending test execution state, resuming test...');
+        await this.resumeTest(response.state);
+      }
+    } catch (error) {
+      // Content script might not be ready or no pending test
+      console.log('No pending test execution found or content script not ready');
+    }
+  }
+
   setupMessageListener() {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       switch (message.action) {
@@ -63,6 +89,9 @@ class E2EContentScript {
           break;
         case 'replayTest':
           this.replayTest(message.test);
+          break;
+        case 'resumeTest':
+          this.resumeTest(message.executionState);
           break;
         case 'captureFullPageScreenshot':
           this.captureFullPageScreenshot()
@@ -98,10 +127,13 @@ class E2EContentScript {
     this.isRecording = true;
     this.currentTestName = testName;
     this.recordedSteps = [];
+    this.startUrl = window.location.href; // Save starting URL
 
     this.overlay.textContent = `Recording: ${testName}`;
     this.overlay.style.display = 'block';
     this.overlay.style.background = '#dc2626';
+
+    console.log(`📝 Started recording "${testName}" from URL: ${this.startUrl}`);
 
     this.setupRecordingListeners();
   }
@@ -467,15 +499,23 @@ class E2EContentScript {
 
   generateSelector(element) {
     if (element.id) {
-      return `#${element.id}`;
+      return `#${element.id.replace(/:/g, '\\:')}`;
     }
 
     if (element.className) {
-      const classes = element.className.split(' ').filter(c => c.trim());
+      const classes = element.className.split(' ')
+        .filter(c => c.trim())
+        .map(c => c.replace(/:/g, '\\:')); // Escape colons for Tailwind CSS classes
+
       if (classes.length > 0) {
         const selector = `.${classes.join('.')}`;
-        if (document.querySelectorAll(selector).length === 1) {
-          return selector;
+        try {
+          if (document.querySelectorAll(selector).length === 1) {
+            return selector;
+          }
+        } catch (e) {
+          // If selector is still invalid, continue to next method
+          console.warn('Invalid class selector generated:', selector);
         }
       }
     }
@@ -495,7 +535,7 @@ class E2EContentScript {
       let selector = current.nodeName.toLowerCase();
 
       if (current.id) {
-        selector += `#${current.id}`;
+        selector += `#${current.id.replace(/:/g, '\\:')}`;
         path.unshift(selector);
         break;
       }
@@ -517,6 +557,134 @@ class E2EContentScript {
     }
 
     return path.join(' > ');
+  }
+
+  showTestResult(success, testName, totalSteps, errorMessage, duration = null) {
+    const resultModal = document.createElement('div');
+    resultModal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 10004;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `;
+
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      text-align: center;
+      min-width: 400px;
+      max-width: 500px;
+    `;
+
+    const currentTime = new Date().toLocaleTimeString();
+    const icon = success ? '✅' : '❌';
+    const status = success ? 'PASSED' : 'FAILED';
+    const color = success ? '#10b981' : '#dc2626';
+
+    modal.innerHTML = `
+      <div style="font-size: 48px; margin-bottom: 20px;">${icon}</div>
+      <h2 style="margin: 0 0 10px 0; color: ${color}; font-size: 24px;">Test ${status}</h2>
+      <div style="font-size: 18px; color: #374151; margin-bottom: 20px; font-weight: 500;">${testName}</div>
+
+      <div style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr${duration ? ' 1fr' : ''}; gap: 15px; text-align: left;">
+          <div>
+            <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px;">Total Steps</div>
+            <div style="font-size: 18px; font-weight: 600; color: #1f2937;">${totalSteps}</div>
+          </div>
+          <div>
+            <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px;">Completed</div>
+            <div style="font-size: 18px; font-weight: 600; color: #1f2937;">${currentTime}</div>
+          </div>
+          ${duration ? `
+          <div>
+            <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px;">Duration</div>
+            <div style="font-size: 18px; font-weight: 600; color: #1f2937;">${(duration / 1000).toFixed(1)}s</div>
+          </div>
+          ` : ''}
+        </div>
+
+        ${!success ? `
+        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e5e7eb;">
+          <div style="font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px;">Error</div>
+          <div style="font-size: 14px; color: #dc2626; background: #fef2f2; padding: 10px; border-radius: 6px; word-break: break-word;">${errorMessage}</div>
+        </div>
+        ` : ''}
+      </div>
+
+      <button id="close-result-modal" style="
+        background: ${color};
+        color: white;
+        border: none;
+        padding: 12px 30px;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+      ">Close</button>
+    `;
+
+    resultModal.appendChild(modal);
+    document.body.appendChild(resultModal);
+
+    // Close button event
+    document.getElementById('close-result-modal').addEventListener('click', () => {
+      document.body.removeChild(resultModal);
+    });
+
+    // Click outside to close
+    resultModal.addEventListener('click', (e) => {
+      if (e.target === resultModal) {
+        document.body.removeChild(resultModal);
+      }
+    });
+
+    // Auto-close after delay (longer for failures)
+    setTimeout(() => {
+      if (resultModal.parentNode) {
+        document.body.removeChild(resultModal);
+      }
+    }, success ? 4000 : 8000);
+  }
+
+  // Test method to verify Tailwind CSS selector escaping
+  testTailwindSelectorEscaping() {
+    const testClasses = [
+      'flex flex-col xl:flex-1 md:items-center',
+      'sm:text-xl lg:text-2xl hover:bg-blue-500',
+      'md:w-1/2 lg:w-1/3 xl:w-1/4'
+    ];
+
+    console.log('🧪 Testing Tailwind CSS selector escaping:');
+    testClasses.forEach(className => {
+      const escaped = className.split(' ')
+        .filter(c => c.trim())
+        .map(c => c.replace(/:/g, '\\:'))
+        .join('.');
+
+      const selector = `.${escaped}`;
+      console.log(`Original: "${className}"`);
+      console.log(`Escaped: "${selector}"`);
+
+      try {
+        document.querySelector(selector);
+        console.log('✅ Valid selector');
+      } catch (e) {
+        console.log('❌ Invalid selector:', e.message);
+      }
+      console.log('---');
+    });
   }
 
   recordStep(step) {
@@ -607,8 +775,17 @@ class E2EContentScript {
   }
 
   async saveRecordedSteps() {
+    const testData = {
+      name: this.currentTestName,
+      startUrl: this.startUrl,
+      steps: this.recordedSteps,
+      createdAt: new Date().toISOString()
+    };
+
+    console.log(`💾 Saving test "${this.currentTestName}" with start URL: ${this.startUrl}`);
+
     await chrome.storage.local.set({
-      [`recording_${this.currentTestName}`]: this.recordedSteps
+      [`recording_${this.currentTestName}`]: testData
     });
   }
 
@@ -620,36 +797,129 @@ class E2EContentScript {
     this.overlay.style.display = 'block';
     this.overlay.style.background = '#1d4ed8';
 
+    const startTime = Date.now();
+
     try {
-      for (let i = 0; i < test.steps.length; i++) {
-        const step = test.steps[i];
-        await this.executeStep(step, i + 1, test.steps.length);
-        await this.delay(this.settings.replayDelay);
+      // Navigate to start URL if available and different from current URL
+      if (test.startUrl && test.startUrl !== window.location.href) {
+        console.log(`🔗 Navigating to start URL: ${test.startUrl}`);
+        this.overlay.textContent = `Navigating to start URL...`;
+
+        // Save test execution state before navigation
+        await this.saveTestExecutionState(test, 0, startTime);
+
+        window.location.href = test.startUrl;
+        // Navigation will interrupt execution here
+        return;
       }
-
-      this.overlay.textContent = `✓ Replay completed: ${test.name}`;
-      this.overlay.style.background = '#10b981';
-
-      setTimeout(() => {
-        this.overlay.style.display = 'none';
-      }, 2000);
+      // Execute test steps from the beginning
+      await this.executeTestSteps(test, 0, startTime);
 
     } catch (error) {
       console.error('Replay failed:', error);
-      this.overlay.textContent = `✗ Replay failed: ${error.message}`;
-      this.overlay.style.background = '#dc2626';
-      this.overlay.style.display = 'block'; // Ensure it's visible
-      this.overlay.style.zIndex = '10003'; // Higher z-index
+      this.handleTestFailure(test, error, startTime);
+    }
+  }
 
-      // Also show a prominent error indicator with longer duration
-      this.showScreenshotIndicator(`❌ Test Failed: ${error.message.substring(0, 50)}...`, 3000);
+  async saveTestExecutionState(test, currentStepIndex, startTime) {
+    try {
+      // Content script doesn't have access to chrome.tabs
+      // Background script will determine the tab ID from sender
+      await chrome.runtime.sendMessage({
+        action: 'saveTestExecutionState',
+        testData: test,
+        currentStepIndex: currentStepIndex,
+        startTime: startTime
+      });
+    } catch (error) {
+      console.error('Failed to save test execution state:', error);
+    }
+  }
+
+  async resumeTest(executionState) {
+    if (this.isReplaying) return;
+
+    console.log('🔄 Resuming test from saved state:', executionState);
+
+    this.isReplaying = true;
+    this.overlay.textContent = `Resuming test...`;
+    this.overlay.style.display = 'block';
+    this.overlay.style.background = '#1d4ed8';
+
+    try {
+      await this.executeTestSteps(
+        executionState.testData,
+        executionState.currentStepIndex,
+        executionState.startTime
+      );
+    } catch (error) {
+      console.error('Failed to resume test:', error);
+      this.handleTestFailure(executionState.testData, error, executionState.startTime);
+    }
+  }
+
+  async executeTestSteps(test, startStepIndex, startTime) {
+    // Handle both old format (direct array) and new format (object with steps property)
+    const steps = Array.isArray(test) ? test : (test.steps || test);
+    const testName = test.name || 'Unnamed Test';
+
+    try {
+      for (let i = startStepIndex; i < steps.length; i++) {
+        const step = steps[i];
+
+        // Save progress before each step (in case of navigation)
+        await this.saveTestExecutionState(test, i + 1, startTime);
+
+        await this.executeStep(step, i + 1, steps.length);
+
+        // Update progress in overlay
+        const progress = Math.round(((i + 1) / steps.length) * 100);
+        this.overlay.textContent = `Replaying: ${testName} (${progress}%)`;
+
+        await this.delay(this.settings.replayDelay);
+      }
+
+      // Test completed successfully
+      this.overlay.textContent = `✓ Replay completed: ${testName}`;
+      this.overlay.style.background = '#10b981';
+
+      const duration = Date.now() - startTime;
+      this.showTestResult(true, testName, steps.length, null, duration);
+
+      // Clear execution state
+      await chrome.runtime.sendMessage({ action: 'clearTestExecutionState' });
 
       setTimeout(() => {
         this.overlay.style.display = 'none';
-      }, 5000); // Longer display time for errors
-    }
+        this.isReplaying = false;
+      }, 2000);
 
-    this.isReplaying = false;
+    } catch (error) {
+      throw error; // Re-throw to be handled by caller
+    }
+  }
+
+  handleTestFailure(test, error, startTime) {
+    const steps = Array.isArray(test) ? test : (test.steps || test);
+    const testName = test.name || 'Unnamed Test';
+
+    this.overlay.textContent = `✗ Replay failed: ${error.message}`;
+    this.overlay.style.background = '#dc2626';
+    this.overlay.style.display = 'block';
+    this.overlay.style.zIndex = '10003';
+
+    this.showScreenshotIndicator(`❌ Test Failed: ${error.message.substring(0, 50)}...`, 3000);
+
+    const duration = Date.now() - startTime;
+    this.showTestResult(false, testName, steps.length, error.message, duration);
+
+    // Clear execution state
+    chrome.runtime.sendMessage({ action: 'clearTestExecutionState' });
+
+    setTimeout(() => {
+      this.overlay.style.display = 'none';
+      this.isReplaying = false;
+    }, 5000);
   }
 
   async executeStep(step, currentStep, totalSteps) {
@@ -716,10 +986,59 @@ class E2EContentScript {
       return; // Skip element-based logic
     }
 
-    const element = document.querySelector(step.selector);
+    console.log(`🔍 Step ${currentStep}: ${step.type} on "${step.selector}"`);
+
+    let element;
+    try {
+      element = document.querySelector(step.selector);
+    } catch (selectorError) {
+      console.error(`❌ Invalid selector: "${step.selector}"`, selectorError);
+      throw new Error(`Invalid CSS selector: ${step.selector} - ${selectorError.message}`);
+    }
+
     if (!element) {
+      console.error(`❌ Element not found for selector: "${step.selector}"`);
+      console.log('📋 Available elements that might match:');
+
+      // Try to find similar elements for debugging
+      try {
+        const tagName = step.selector.match(/^([a-zA-Z]+)/)?.[1];
+        if (tagName) {
+          const similarElements = document.querySelectorAll(tagName);
+          console.log(`Found ${similarElements.length} <${tagName}> elements on page`);
+          similarElements.forEach((el, index) => {
+            if (index < 5) { // Show first 5
+              console.log(`  ${index + 1}. ${el.tagName} - id: ${el.id || 'none'} - class: ${el.className || 'none'}`);
+            }
+          });
+        }
+
+        // Check if selector contains ID
+        const idMatch = step.selector.match(/#([^.\s>]+)/);
+        if (idMatch) {
+          const id = idMatch[1];
+          console.log(`Looking for element with id="${id}"...`);
+          const elementById = document.getElementById(id);
+          console.log(`Element with id="${id}" ${elementById ? 'EXISTS' : 'NOT FOUND'}`);
+        }
+
+        // Check if selector contains class
+        const classMatch = step.selector.match(/\.([^.\s>#]+)/);
+        if (classMatch) {
+          const className = classMatch[1];
+          console.log(`Looking for elements with class="${className}"...`);
+          const elementsByClass = document.getElementsByClassName(className);
+          console.log(`Found ${elementsByClass.length} elements with class="${className}"`);
+        }
+
+      } catch (debugError) {
+        console.warn('Debug analysis failed:', debugError);
+      }
+
       throw new Error(`Element not found: ${step.selector}`);
     }
+
+    console.log(`✅ Element found: ${element.tagName}${element.id ? '#' + element.id : ''}`);
 
     // Ensure element is visible and scroll is complete first
     await this.scrollToElementAndWait(element);
@@ -747,27 +1066,35 @@ class E2EContentScript {
       }
     }
 
-    switch (step.type) {
-      case 'click':
-        element.click();
-        break;
-      case 'input':
-        element.focus();
-        element.value = step.value;
-        element.dispatchEvent(new Event('input', { bubbles: true }));
-        break;
-      case 'change':
-        if (element.type === 'checkbox' || element.type === 'radio') {
-          element.checked = step.value;
-        } else {
+    try {
+      switch (step.type) {
+        case 'click':
+          element.click();
+          break;
+        case 'input':
+          element.focus();
           element.value = step.value;
-        }
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-        break;
-      case 'keypress':
-        element.focus();
-        element.dispatchEvent(new KeyboardEvent('keydown', { key: step.key, bubbles: true }));
-        break;
+          element.dispatchEvent(new Event('input', { bubbles: true }));
+          break;
+        case 'change':
+          if (element.type === 'checkbox' || element.type === 'radio') {
+            element.checked = step.value;
+          } else {
+            element.value = step.value;
+          }
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+          break;
+        case 'keypress':
+          element.focus();
+          element.dispatchEvent(new KeyboardEvent('keydown', { key: step.key, bubbles: true }));
+          break;
+        default:
+          console.warn(`⚠️ Unknown step type: ${step.type}`);
+      }
+      console.log(`✅ ${step.type} executed`);
+    } catch (actionError) {
+      console.error(`❌ Failed to execute ${step.type}:`, actionError);
+      throw new Error(`Action execution failed: ${actionError.message}`);
     }
 
     // Show visual diff if there's a significant difference
@@ -1081,10 +1408,22 @@ class E2EContentScript {
   }
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', async () => {
-    new E2EContentScript();
-  });
-} else {
-  new E2EContentScript();
+// Initialize content script
+function initializeE2EContentScript() {
+  if (window.e2eContentScriptInstance) {
+    console.log('E2E Content Script instance already exists, skipping initialization...');
+    return;
+  }
+
+  window.e2eContentScriptInstance = new E2EContentScript();
+  window.E2EContentScript = E2EContentScript; // Mark as loaded
+  console.log('E2E Content Script initialized');
 }
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeE2EContentScript);
+} else {
+  initializeE2EContentScript();
+}
+
+} // End of the if block that prevents multiple loading

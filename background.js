@@ -9,6 +9,7 @@ class E2EBackgroundScript {
     this.setupCommandListener();
     this.setupContextMenu();
     this.setupMessageListener();
+    this.setupTestExecutionTabListener();
   }
 
   setupInstallListener() {
@@ -61,6 +62,38 @@ class E2EBackgroundScript {
               sendResponse({ error: error.message });
             });
           return true; // Keep message channel open for async response
+        case 'saveTestExecutionState':
+          this.saveTestExecutionState(
+            message.tabId || sender.tab?.id,
+            message.testData,
+            message.currentStepIndex,
+            message.startTime
+          )
+            .then(() => {
+              sendResponse({ success: true });
+            })
+            .catch(error => {
+              sendResponse({ error: error.message });
+            });
+          return true;
+        case 'getTestExecutionState':
+          this.getTestExecutionState(message.tabId || sender.tab?.id)
+            .then(state => {
+              sendResponse({ state });
+            })
+            .catch(error => {
+              sendResponse({ error: error.message });
+            });
+          return true;
+        case 'clearTestExecutionState':
+          this.clearTestExecutionState(message.tabId || sender.tab?.id)
+            .then(() => {
+              sendResponse({ success: true });
+            })
+            .catch(error => {
+              sendResponse({ error: error.message });
+            });
+          return true;
         default:
           console.log('Unknown action:', message.action);
           sendResponse({ error: 'Unknown action' });
@@ -411,6 +444,63 @@ class E2EBackgroundScript {
       console.error('Failed to update step screenshot:', error);
       throw error;
     }
+  }
+
+  // Test execution state management
+  async saveTestExecutionState(tabId, testData, currentStepIndex, startTime) {
+    const executionState = {
+      tabId: tabId,
+      testData: testData,
+      currentStepIndex: currentStepIndex,
+      startTime: startTime,
+      timestamp: Date.now()
+    };
+
+    await chrome.storage.local.set({
+      [`testExecution_${tabId}`]: executionState
+    });
+
+    console.log(`💾 Saved test execution state for tab ${tabId}, step ${currentStepIndex}`);
+  }
+
+  async getTestExecutionState(tabId) {
+    const result = await chrome.storage.local.get([`testExecution_${tabId}`]);
+    return result[`testExecution_${tabId}`] || null;
+  }
+
+  async clearTestExecutionState(tabId) {
+    await chrome.storage.local.remove([`testExecution_${tabId}`]);
+    console.log(`🗑️ Cleared test execution state for tab ${tabId}`);
+  }
+
+  setupTestExecutionTabListener() {
+    chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+      // Only process when page loading is complete
+      if (changeInfo.status === 'complete' && tab.url) {
+        console.log(`📄 Page load complete for tab ${tabId}: ${tab.url}`);
+
+        // Check if there's a pending test execution for this tab
+        const executionState = await this.getTestExecutionState(tabId);
+
+        if (executionState) {
+          console.log(`🔄 Found pending test execution for tab ${tabId}, attempting to resume...`);
+
+          // Wait a bit for content script to be ready
+          setTimeout(async () => {
+            try {
+              // Send resume message to content script
+              await chrome.tabs.sendMessage(tabId, {
+                action: 'resumeTest',
+                executionState: executionState
+              });
+            } catch (error) {
+              console.error(`Failed to resume test in tab ${tabId}:`, error);
+              // If content script is not ready, it will check for pending state on init
+            }
+          }, 1000);
+        }
+      }
+    });
   }
 }
 

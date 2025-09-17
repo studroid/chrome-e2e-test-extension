@@ -337,7 +337,23 @@ class E2ETestRecorder {
       await this.sendMessageToActiveTab({ action: 'stopRecording' });
 
       const result = await chrome.storage.local.get([`recording_${this.currentTest.name}`]);
-      const contentScriptSteps = result[`recording_${this.currentTest.name}`] || [];
+      const contentScriptData = result[`recording_${this.currentTest.name}`];
+
+      // Handle both old format (array) and new format (object with steps)
+      let contentScriptSteps = [];
+      if (contentScriptData) {
+        if (Array.isArray(contentScriptData)) {
+          // Old format: direct array
+          contentScriptSteps = contentScriptData;
+        } else if (contentScriptData.steps && Array.isArray(contentScriptData.steps)) {
+          // New format: object with steps array
+          contentScriptSteps = contentScriptData.steps;
+          // Also save the start URL if available
+          if (contentScriptData.startUrl) {
+            this.currentTest.startUrl = contentScriptData.startUrl;
+          }
+        }
+      }
 
       // Merge content script steps with popup steps (like screenshots)
       // Sort all steps by timestamp to maintain proper order
