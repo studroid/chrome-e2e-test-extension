@@ -178,6 +178,58 @@
       border-color: #3b82f6;
       box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
     }
+
+    .screenshot-controls {
+      margin-bottom: 15px;
+    }
+
+    .screenshot-controls button {
+      width: 100%;
+      margin-bottom: 10px;
+    }
+
+    .test-screenshots {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
+      gap: 5px;
+      margin-top: 5px;
+    }
+
+    .screenshot-thumbnail {
+      width: 60px;
+      height: 40px;
+      object-fit: cover;
+      border: 1px solid #e1e5e9;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+
+    .screenshot-thumbnail:hover {
+      transform: scale(1.1);
+      z-index: 10;
+      position: relative;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .screenshot-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 10000;
+    }
+
+    .screenshot-modal img {
+      max-width: 90%;
+      max-height: 90%;
+      border-radius: 8px;
+    }
   </style>
 </head>
 <body>
@@ -194,11 +246,16 @@
     <input type="text" id="testName" placeholder="Enter test name...">
   </div>
 
+  <div class="screenshot-controls">
+    <button id="captureScreenshot" class="btn-secondary">📸 Capture Screenshot</button>
+  </div>
+
   <div class="controls">
     <button id="startRecording" class="btn-primary">Start Recording</button>
     <button id="stopRecording" class="btn-danger" disabled>Stop Recording</button>
     <button id="importTests" class="btn-secondary">Import Tests</button>
     <button id="exportAllTests" class="btn-secondary">Export All</button>
+    <button id="viewScreenshots" class="btn-secondary">📸 View Screenshots</button>
     <button id="clearTests" class="btn-secondary">Clear All Tests</button>
     <input type="file" id="fileInput" accept=".json" style="display: none;">
   </div>
@@ -206,6 +263,16 @@
   <div class="test-list" id="testList">
     <div class="empty-state">
       No tests recorded yet
+    </div>
+  </div>
+
+  <div class="screenshot-gallery" id="screenshotGallery" style="display: none;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+      <h3 style="margin: 0;">Screenshots</h3>
+      <button id="closeGallery" class="btn-secondary" style="padding: 5px 10px; font-size: 12px;">Close</button>
+    </div>
+    <div id="screenshotGrid" class="test-screenshots">
+      <div class="empty-state">No screenshots captured yet</div>
     </div>
   </div>
 
