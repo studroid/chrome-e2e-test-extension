@@ -1145,11 +1145,21 @@ class E2EContentScript {
     } catch (error) {
       console.error('❌ Replay failed:', error);
       this.handleTestFailure(test, error, startTime);
+      // Ensure state is reset even if handleTestFailure fails
+      if (this.isReplaying) {
+        console.warn('⚠️ State still locked after error, forcing reset');
+        this.forceResetReplayState();
+      }
     } finally {
       // Always clear timeout when test completes (success or failure)
       if (this.currentReplayTimeout) {
         clearTimeout(this.currentReplayTimeout);
         this.currentReplayTimeout = null;
+      }
+      // Double-check state is reset
+      if (this.isReplaying) {
+        console.warn('⚠️ State still locked in finally block, forcing reset');
+        this.forceResetReplayState();
       }
     }
   }
@@ -1194,20 +1204,43 @@ class E2EContentScript {
   // Force reset replay state - used for recovery
   forceResetReplayState() {
     console.log('🔄 Force resetting replay state');
+    console.log(`  Before reset - isReplaying: ${this.isReplaying}`);
+
     this.isReplaying = false;
+
     if (this.currentReplayTimeout) {
       clearTimeout(this.currentReplayTimeout);
       this.currentReplayTimeout = null;
     }
+
     if (this.overlay) {
       this.overlay.style.display = 'none';
     }
+
     // Clear any pending execution state
     try {
       chrome.runtime.sendMessage({ action: 'clearTestExecutionState' });
     } catch (error) {
       console.warn('Failed to clear execution state during force reset:', error);
     }
+
+    console.log(`  After reset - isReplaying: ${this.isReplaying}`);
+    console.log('✅ Force reset completed - you can now start a new test');
+  }
+
+  // Debug helper to check current state
+  checkState() {
+    console.log('🔍 Current E2E Test State:');
+    console.log(`  isReplaying: ${this.isReplaying}`);
+    console.log(`  isRecording: ${this.isRecording}`);
+    console.log(`  currentTestName: ${this.currentTestName}`);
+    console.log(`  hasTimeout: ${!!this.currentReplayTimeout}`);
+    console.log(`  overlay visible: ${this.overlay?.style?.display !== 'none'}`);
+    return {
+      isReplaying: this.isReplaying,
+      isRecording: this.isRecording,
+      canStartNewTest: !this.isReplaying && !this.isRecording
+    };
   }
 
   async executeTestSteps(test, startStepIndex, startTime) {
@@ -1292,6 +1325,7 @@ class E2EContentScript {
     const testName = test.name || 'Unnamed Test';
 
     console.error(`❌ Test "${testName}" failed:`, error);
+    console.log(`🔄 Current isReplaying state before cleanup: ${this.isReplaying}`);
 
     this.overlay.textContent = `✗ Replay failed: ${error.message}`;
     this.overlay.style.background = '#dc2626';
@@ -1305,6 +1339,8 @@ class E2EContentScript {
 
     // Immediate cleanup on failure
     this.cleanupTestExecutionSync();
+
+    console.log(`✅ Current isReplaying state after cleanup: ${this.isReplaying}`);
 
     // Show failure overlay slightly longer but reset state immediately
     setTimeout(() => {
@@ -1406,7 +1442,13 @@ class E2EContentScript {
     });
 
     if (!element) {
-      throw new Error(`Element not found after retries: ${step.selector}`);
+      const errorMsg = `Element not found after retries: ${step.selector}`;
+      console.error(`❌ ${errorMsg}`);
+      console.log('💡 Tip: The page structure may have changed. Try re-recording this test.');
+
+      // Show more helpful error to user
+      this.showScreenshotIndicator(`❌ Step ${currentStep} failed: Element not found`, 3000);
+      throw new Error(errorMsg);
     }
 
     console.log(`✅ Element found: ${element.tagName}${element.id ? '#' + element.id : ''}`);
