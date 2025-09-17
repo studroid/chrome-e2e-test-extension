@@ -212,24 +212,6 @@
       box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
     }
 
-    .screenshot-modal {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.8);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      z-index: 10000;
-    }
-
-    .screenshot-modal img {
-      max-width: 90%;
-      max-height: 90%;
-      border-radius: 8px;
-    }
   </style>
 </head>
 <body>
@@ -255,7 +237,6 @@
     <button id="stopRecording" class="btn-danger" disabled>Stop Recording</button>
     <button id="importTests" class="btn-secondary">Import Tests</button>
     <button id="exportAllTests" class="btn-secondary">Export All</button>
-    <button id="viewScreenshots" class="btn-secondary">📸 View Screenshots</button>
     <button id="clearTests" class="btn-secondary">Clear All Tests</button>
     <input type="file" id="fileInput" accept=".json" style="display: none;">
   </div>
@@ -266,15 +247,6 @@
     </div>
   </div>
 
-  <div class="screenshot-gallery" id="screenshotGallery" style="display: none;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-      <h3 style="margin: 0;">Screenshots</h3>
-      <button id="closeGallery" class="btn-secondary" style="padding: 5px 10px; font-size: 12px;">Close</button>
-    </div>
-    <div id="screenshotGrid" class="test-screenshots">
-      <div class="empty-state">No screenshots captured yet</div>
-    </div>
-  </div>
 
   <script src="popup.js"></script>
 </body>

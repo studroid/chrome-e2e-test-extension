@@ -50,9 +50,7 @@ class E2ETestRecorder {
     document.getElementById('captureScreenshot').addEventListener('click', () => this.captureScreenshot());
     document.getElementById('importTests').addEventListener('click', () => this.importTests());
     document.getElementById('exportAllTests').addEventListener('click', () => this.exportAllTests());
-    document.getElementById('viewScreenshots').addEventListener('click', () => this.showScreenshotGallery());
     document.getElementById('clearTests').addEventListener('click', () => this.clearAllTests());
-    document.getElementById('closeGallery').addEventListener('click', () => this.hideScreenshotGallery());
 
     document.getElementById('testName').addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
@@ -736,68 +734,6 @@ class E2ETestRecorder {
     document.body.appendChild(modal);
   }
 
-  async showScreenshotGallery() {
-    const result = await chrome.storage.local.get(['screenshots']);
-    const screenshots = result.screenshots || [];
-
-    document.getElementById('testList').style.display = 'none';
-    document.getElementById('screenshotGallery').style.display = 'block';
-
-    this.renderScreenshotGallery(screenshots);
-  }
-
-  hideScreenshotGallery() {
-    document.getElementById('testList').style.display = 'block';
-    document.getElementById('screenshotGallery').style.display = 'none';
-  }
-
-  renderScreenshotGallery(screenshots) {
-    const grid = document.getElementById('screenshotGrid');
-
-    if (screenshots.length === 0) {
-      grid.innerHTML = '<div class="empty-state">No screenshots captured yet</div>';
-      return;
-    }
-
-    grid.innerHTML = screenshots.map((screenshot, index) => `
-      <div style="position: relative;">
-        <img src="${screenshot.dataUrl}" class="screenshot-thumbnail"
-             data-screenshot-index="${index}"
-             title="${screenshot.title} - ${new Date(screenshot.timestamp).toLocaleString()}">
-        <div style="font-size: 10px; text-align: center; margin-top: 2px; color: #6b7280;">
-          ${new Date(screenshot.timestamp).toLocaleTimeString()}
-        </div>
-        <button class="screenshot-delete" data-screenshot-index="${index}"
-                style="position: absolute; top: 2px; right: 2px; background: #ef4444; color: white; border: none; border-radius: 50%; width: 16px; height: 16px; font-size: 10px; cursor: pointer;">×</button>
-      </div>
-    `).join('');
-
-    // Add event listeners
-    grid.querySelectorAll('.screenshot-thumbnail').forEach(img => {
-      img.addEventListener('click', (e) => {
-        const index = parseInt(e.target.getAttribute('data-screenshot-index'));
-        this.showScreenshotModal(screenshots[index].dataUrl);
-      });
-    });
-
-    grid.querySelectorAll('.screenshot-delete').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const index = parseInt(e.target.getAttribute('data-screenshot-index'));
-        await this.deleteScreenshot(index);
-        this.showScreenshotGallery(); // Refresh gallery
-      });
-    });
-  }
-
-  async deleteScreenshot(index) {
-    if (confirm('Delete this screenshot?')) {
-      const result = await chrome.storage.local.get(['screenshots']);
-      const screenshots = result.screenshots || [];
-      screenshots.splice(index, 1);
-      await chrome.storage.local.set({ screenshots });
-    }
-  }
 
   escapeHtml(text) {
     const div = document.createElement('div');
