@@ -94,7 +94,7 @@ class E2EContentScript {
           this.stopRecording();
           break;
         case 'replayTest':
-          this.replayTest(message.test);
+          this.replayTest(message.test, message.executionId);
           break;
         case 'resumeTest':
           this.resumeTest(message.executionState);
@@ -1105,13 +1105,16 @@ class E2EContentScript {
     });
   }
 
-  async replayTest(test) {
+  async replayTest(test, executionId = null) {
     if (this.isReplaying) {
       console.warn('⚠️ Test already in progress, ignoring duplicate request');
       return;
     }
 
-    console.log(`🎬 Starting test replay: "${test.name}"`);
+    console.log(`🎬 Starting test replay: "${test.name}" (ID: ${executionId})`);
+
+    // Store execution ID for message tracking
+    this.currentExecutionId = executionId;
 
     // Set replaying state with timeout protection
     this.isReplaying = true;
@@ -1207,6 +1210,7 @@ class E2EContentScript {
     console.log(`  Before reset - isReplaying: ${this.isReplaying}`);
 
     this.isReplaying = false;
+    this.currentExecutionId = null; // Clear execution ID
 
     if (this.currentReplayTimeout) {
       clearTimeout(this.currentReplayTimeout);
@@ -1271,7 +1275,8 @@ class E2EContentScript {
             action: 'testProgress',
             testName: testName,
             currentStep: i + 1,
-            totalSteps: steps.length
+            totalSteps: steps.length,
+            executionId: this.currentExecutionId
           });
         } catch (error) {
           // Ignore error, progress update is not critical
@@ -1310,7 +1315,8 @@ class E2EContentScript {
       chrome.runtime.sendMessage({
         action: 'testCompleted',
         testName: testName,
-        duration: duration
+        duration: duration,
+        executionId: this.currentExecutionId
       });
     } catch (error) {
       console.warn('Failed to notify popup about test completion:', error);
@@ -1359,7 +1365,8 @@ class E2EContentScript {
       chrome.runtime.sendMessage({
         action: 'testFailed',
         testName: testName,
-        error: error.message
+        error: error.message,
+        executionId: this.currentExecutionId
       });
     } catch (msgError) {
       console.warn('Failed to notify popup about test failure:', msgError);

@@ -20,18 +20,24 @@ class E2ETestRecorder {
     // Listen for messages from content script about test completion
     chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       if (message.action === 'testCompleted' || message.action === 'testFailed') {
-        console.log(`Test ${message.action}: ${message.testName}`);
-        // Clear replaying state
-        if (this.currentReplayingTest && this.currentReplayingTest.name === message.testName) {
+        console.log(`Test ${message.action}: ${message.testName} (ID: ${message.executionId})`);
+        // Clear replaying state - match by execution ID for precision
+        if (this.currentReplayingTest &&
+            (message.executionId ?
+             this.currentReplayingTest.executionId === message.executionId :
+             this.currentReplayingTest.name === message.testName)) {
           this.currentReplayingTest = null;
           await this.clearReplayState(); // Clear from storage
           this.updateUI();
         }
       } else if (message.action === 'testProgress') {
         // Update progress if needed
-        console.log(`Test progress: ${message.testName} - Step ${message.currentStep}/${message.totalSteps}`);
-        // Update current step info if we have the test
-        if (this.currentReplayingTest && this.currentReplayingTest.name === message.testName) {
+        console.log(`Test progress: ${message.testName} - Step ${message.currentStep}/${message.totalSteps} (ID: ${message.executionId})`);
+        // Update current step info if we have the test - match by execution ID
+        if (this.currentReplayingTest &&
+            (message.executionId ?
+             this.currentReplayingTest.executionId === message.executionId :
+             this.currentReplayingTest.name === message.testName)) {
           this.currentReplayingTest.currentStep = message.currentStep;
           this.currentReplayingTest.totalSteps = message.totalSteps;
           await this.saveReplayState(); // Save updated progress
@@ -599,17 +605,22 @@ class E2ETestRecorder {
 
       this.showNotification('Starting test replay...', 'info');
 
-      // Set current replaying test
-      this.currentReplayingTest = test;
-      this.currentReplayingTest.currentStep = 0;
-      this.currentReplayingTest.totalSteps = test.steps ? test.steps.length : 0;
+      // Set current replaying test with unique execution ID
+      this.currentReplayingTest = {
+        ...test,
+        executionId: `${test.name}_${test.timestamp}_${Date.now()}`, // Unique execution ID
+        currentStep: 0,
+        totalSteps: test.steps ? test.steps.length : 0,
+        startTime: Date.now()
+      };
       await this.saveReplayState(); // Save to storage
       this.updateUI(); // Update UI to show replaying state
 
-      // Start replay FIRST
+      // Start replay FIRST - send execution ID for tracking
       await this.sendMessageToActiveTab({
         action: 'replayTest',
-        test: test
+        test: test,
+        executionId: this.currentReplayingTest.executionId
       });
 
       this.showNotification('Replay started successfully!', 'success');
@@ -839,7 +850,10 @@ class E2ETestRecorder {
     }
 
     container.innerHTML = this.tests.map((test, index) => {
-      const isReplaying = this.currentReplayingTest && this.currentReplayingTest.name === test.name;
+      // Compare using name AND timestamp to uniquely identify the exact test instance
+      const isReplaying = this.currentReplayingTest &&
+                         this.currentReplayingTest.name === test.name &&
+                         this.currentReplayingTest.timestamp === test.timestamp;
       const screenshotSteps = test.steps.filter(step => step.type === 'screenshot' || step.screenshot);
       const screenshotCount = screenshotSteps.length;
       const screenshotsHtml = screenshotCount > 0 ? `
