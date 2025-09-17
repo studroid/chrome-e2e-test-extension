@@ -108,14 +108,13 @@ class E2EContentScript {
 
   async captureFullPageScreenshot() {
     try {
-      // Show progress overlay
-      this.showScreenshotProgress('Capturing screenshot...');
+      // Hide all indicators and progress overlays before taking screenshot
+      this.hideAllIndicators();
+      this.hideScreenshotProgress();
+      await this.delay(100); // Brief delay to ensure everything is hidden
 
       // Simply capture the current viewport for now
       const screenshot = await this.captureScreenshot();
-
-      // Hide progress overlay
-      this.hideScreenshotProgress();
 
       if (!screenshot) {
         throw new Error('Failed to capture viewport screenshot');
@@ -423,6 +422,27 @@ class E2EContentScript {
     }, duration);
   }
 
+  hideAllIndicators() {
+    // Remove all existing screenshot indicators to prevent them from appearing in screenshots
+    const indicators = document.querySelectorAll('[style*="z-index: 10002"]');
+    indicators.forEach(indicator => {
+      if (indicator.parentNode) {
+        indicator.parentNode.removeChild(indicator);
+      }
+    });
+
+    // Also hide screenshot progress overlay
+    this.hideScreenshotProgress();
+
+    // Remove any other high z-index overlays that might interfere
+    const highZIndexElements = document.querySelectorAll('[style*="z-index: 2147483647"]');
+    highZIndexElements.forEach(element => {
+      if (element.parentNode && element !== this.overlay) {
+        element.style.display = 'none';
+      }
+    });
+  }
+
   async updateBaselineScreenshot(step, newScreenshot, stepNumber) {
     try {
       console.log(`Updating baseline screenshot for step ${stepNumber}...`);
@@ -545,6 +565,10 @@ class E2EContentScript {
       element.scrollIntoView({ behavior: 'auto', block: 'center' });
       await this.delay(100);
 
+      // Hide all indicators before taking screenshot to avoid interference
+      this.hideAllIndicators();
+      await this.delay(100);
+
       const rect = element.getBoundingClientRect();
       const screenshot = await this.captureScreenshot();
 
@@ -642,8 +666,10 @@ class E2EContentScript {
       if (step.screenshot) {
         try {
           console.log('Starting screenshot capture for comparison...');
-          this.showScreenshotIndicator('Capturing current screenshot...', 500);
-          await this.delay(500);
+
+          // Hide all indicators before taking screenshot to avoid interference
+          this.hideAllIndicators();
+          await this.delay(200); // Brief delay to ensure indicators are hidden
 
           const currentScreenshot = await this.captureScreenshot();
           console.log('Current screenshot captured, length:', currentScreenshot?.length);
