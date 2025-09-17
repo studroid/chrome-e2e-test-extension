@@ -10,6 +10,7 @@ class E2ETestRecorder {
   async init() {
     await this.loadTests();
     await this.loadRecordingState();
+    await this.loadReplayState(); // Load replay state on popup open
     this.setupEventListeners();
     this.setupMessageListener();
     this.updateUI();
@@ -17,18 +18,25 @@ class E2ETestRecorder {
 
   setupMessageListener() {
     // Listen for messages from content script about test completion
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       if (message.action === 'testCompleted' || message.action === 'testFailed') {
         console.log(`Test ${message.action}: ${message.testName}`);
         // Clear replaying state
         if (this.currentReplayingTest && this.currentReplayingTest.name === message.testName) {
           this.currentReplayingTest = null;
+          await this.clearReplayState(); // Clear from storage
           this.updateUI();
         }
       } else if (message.action === 'testProgress') {
         // Update progress if needed
         console.log(`Test progress: ${message.testName} - Step ${message.currentStep}/${message.totalSteps}`);
-        this.updateUI();
+        // Update current step info if we have the test
+        if (this.currentReplayingTest && this.currentReplayingTest.name === message.testName) {
+          this.currentReplayingTest.currentStep = message.currentStep;
+          this.currentReplayingTest.totalSteps = message.totalSteps;
+          await this.saveReplayState(); // Save updated progress
+          this.updateUI();
+        }
       }
     });
   }
@@ -48,6 +56,32 @@ class E2ETestRecorder {
       this.originalWindowSize = state.originalWindowSize; // 원래 윈도우 크기 복원
       document.getElementById('testName').value = state.currentTest?.name || '';
     }
+  }
+
+  async loadReplayState() {
+    const result = await chrome.storage.local.get(['replayState']);
+    const state = result.replayState;
+
+    if (state && state.isReplaying) {
+      this.currentReplayingTest = state.currentReplayingTest;
+      console.log(`📱 Restored replay state: ${this.currentReplayingTest?.name}`);
+    }
+  }
+
+  async saveReplayState() {
+    const state = {
+      isReplaying: !!this.currentReplayingTest,
+      currentReplayingTest: this.currentReplayingTest,
+      timestamp: Date.now()
+    };
+
+    await chrome.storage.local.set({ replayState: state });
+    console.log(`💾 Saved replay state: ${this.currentReplayingTest?.name || 'none'}`);
+  }
+
+  async clearReplayState() {
+    await chrome.storage.local.remove(['replayState']);
+    console.log(`🗑️ Cleared replay state`);
   }
 
   async saveRecordingState() {
@@ -567,6 +601,9 @@ class E2ETestRecorder {
 
       // Set current replaying test
       this.currentReplayingTest = test;
+      this.currentReplayingTest.currentStep = 0;
+      this.currentReplayingTest.totalSteps = test.steps ? test.steps.length : 0;
+      await this.saveReplayState(); // Save to storage
       this.updateUI(); // Update UI to show replaying state
 
       // Start replay FIRST
@@ -816,13 +853,16 @@ class E2ETestRecorder {
         </div>
       ` : '';
 
+      const progressInfo = isReplaying && this.currentReplayingTest.currentStep && this.currentReplayingTest.totalSteps ?
+        ` (Step ${this.currentReplayingTest.currentStep}/${this.currentReplayingTest.totalSteps})` : '';
+
       return `
         <div class="test-item ${isReplaying ? 'replaying' : ''}">
           <div>
             <div class="test-name">
               ${isReplaying ? '<span class="replaying-indicator">▶</span> ' : ''}
               ${this.escapeHtml(test.name)}
-              ${isReplaying ? ' <span class="replaying-label">(Running...)</span>' : ''}
+              ${isReplaying ? ` <span class="replaying-label">(Running${progressInfo}...)</span>` : ''}
             </div>
             <div style="font-size: 12px; color: #6b7280;">
               ${test.steps.length} steps • ${new Date(test.timestamp).toLocaleDateString()}
@@ -832,7 +872,7 @@ class E2ETestRecorder {
           </div>
           <div class="test-actions">
             <button class="btn-primary" data-action="replay" data-index="${index}" ${isReplaying ? 'disabled' : ''}>
-              ${isReplaying ? 'Running...' : 'Replay'}
+              ${isReplaying ? `Running${progressInfo}...` : 'Replay'}
             </button>
             <button class="btn-secondary" data-action="export" data-index="${index}">
               Export
@@ -914,6 +954,11 @@ class E2ETestRecorder {
       // Clear any recording state
       await chrome.storage.local.remove(['recordingState']);
 
+      // Clear replay state
+      this.currentReplayingTest = null;
+      await this.clearReplayState();
+
+      this.updateUI();
       this.showNotification('⚠️ Test state forcefully reset!', 'warning');
       console.log('✅ Force reset completed');
 
