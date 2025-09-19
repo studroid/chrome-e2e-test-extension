@@ -123,11 +123,32 @@ class E2EContentScript {
             .catch(error => sendResponse({ error: error.message }));
           return true; // Keep message channel open for async response
         case 'getCurrentScrollPosition':
+          // 다양한 스크롤 위치 가져오기 방법 시도
+          const scrollX = window.pageXOffset ||
+                          document.documentElement.scrollLeft ||
+                          document.body.scrollLeft ||
+                          0;
+          const scrollY = window.pageYOffset ||
+                          document.documentElement.scrollTop ||
+                          document.body.scrollTop ||
+                          0;
+
+          console.log('Scroll position check:', {
+            windowScrollX: window.scrollX,
+            windowScrollY: window.scrollY,
+            pageXOffset: window.pageXOffset,
+            pageYOffset: window.pageYOffset,
+            documentScrollTop: document.documentElement.scrollTop,
+            bodyScrollTop: document.body.scrollTop,
+            finalX: scrollX,
+            finalY: scrollY
+          });
+
           sendResponse({
             success: true,
             scrollPosition: {
-              x: window.scrollX,
-              y: window.scrollY
+              x: scrollX,
+              y: scrollY
             }
           });
           return;
@@ -1096,7 +1117,12 @@ class E2EContentScript {
       if (scrollPosition) {
         // Use saved scroll position for exact positioning
         console.log(`📍 Restoring scroll position: x=${scrollPosition.x}, y=${scrollPosition.y}`);
+        // 다양한 방법으로 스크롤 시도
         window.scrollTo(scrollPosition.x, scrollPosition.y);
+        document.documentElement.scrollTop = scrollPosition.y;
+        document.documentElement.scrollLeft = scrollPosition.x;
+        document.body.scrollTop = scrollPosition.y;
+        document.body.scrollLeft = scrollPosition.x;
         await this.delay(300); // Wait longer for scroll to complete
       } else {
         // Fallback to original behavior
@@ -1599,7 +1625,12 @@ class E2EContentScript {
           console.log('Screenshot step:', step); // 전체 step 객체 확인
           if (step.scrollPosition) {
             console.log(`📍 Restoring screenshot scroll position: x=${step.scrollPosition.x}, y=${step.scrollPosition.y}`);
+            // 다양한 방법으로 스크롤 시도
             window.scrollTo(step.scrollPosition.x, step.scrollPosition.y);
+            document.documentElement.scrollTop = step.scrollPosition.y;
+            document.documentElement.scrollLeft = step.scrollPosition.x;
+            document.body.scrollTop = step.scrollPosition.y;
+            document.body.scrollLeft = step.scrollPosition.x;
             await this.delay(300); // Wait for scroll to complete
           } else {
             console.warn('⚠️ No scroll position found in screenshot step'); // 경고 추가
