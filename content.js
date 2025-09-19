@@ -1677,6 +1677,17 @@ class E2EContentScript {
     try {
       switch (step.type) {
         case 'click':
+          // Validate text content if recorded
+          if (step.text && step.text.trim()) {
+            const currentText = element.textContent?.trim() || '';
+            if (currentText !== step.text) {
+              const errorMsg = `Text content mismatch: expected "${step.text}", but got "${currentText}"`;
+              console.error(`❌ ${errorMsg}`);
+              this.showScreenshotIndicator(`❌ Step ${currentStep} failed: Text content changed`, 3000);
+              throw new Error(errorMsg);
+            }
+            console.log(`✅ Text content validated: "${currentText}"`);
+          }
           element.click();
           break;
         case 'input':
