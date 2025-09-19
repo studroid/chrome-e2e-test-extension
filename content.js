@@ -130,7 +130,7 @@ class E2EContentScript {
               y: window.scrollY
             }
           });
-          break;
+          return;
       }
       sendResponse({ success: true });
     });
