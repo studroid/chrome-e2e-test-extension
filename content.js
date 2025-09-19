@@ -697,7 +697,8 @@ class E2EContentScript {
       maxAttempts = 5,
       waitBetweenAttempts = 1000,
       waitForElement = true,
-      timeout = 10000
+      timeout = 10000,
+      expectedText = null
     } = options;
 
     console.log(`🔎 Searching for element: "${selector}" (max attempts: ${maxAttempts})`);
@@ -718,26 +719,59 @@ class E2EContentScript {
       try {
         console.log(`🔄 Attempt ${attempt}/${maxAttempts} for selector: "${selector}"`);
 
-        // Try to find the element
-        let element = document.querySelector(selector);
+        // Try to find the element(s)
+        let elements = document.querySelectorAll(selector);
+        let element = null;
 
-        if (element) {
-          console.log(`✅ Element found on attempt ${attempt}`);
+        if (elements.length > 0) {
+          console.log(`🔍 Found ${elements.length} element(s) matching selector`);
 
-          // If waitForElement is true, also check if element is visible and interactable
-          if (waitForElement) {
-            const isVisible = await this.waitForElementToBeVisible(element);
-            if (isVisible) {
-              return element;
-            } else {
-              console.log(`⏳ Element found but not visible yet, waiting...`);
+          // If expectedText is provided, filter by text content
+          if (expectedText && expectedText.trim()) {
+            console.log(`🔍 Filtering by expected text: "${expectedText}"`);
+
+            for (const el of elements) {
+              const elementText = el.textContent?.trim() || '';
+              if (elementText === expectedText) {
+                element = el;
+                console.log(`✅ Found element with matching text content`);
+                break;
+              }
+            }
+
+            if (!element) {
+              console.log(`❌ No element found with matching text content. Found texts:`);
+              for (let i = 0; i < Math.min(elements.length, 3); i++) {
+                const el = elements[i];
+                const text = (el.textContent?.trim() || '').substring(0, 100);
+                console.log(`  [${i}]: "${text}${text.length >= 100 ? '...' : ''}"`);
+              }
             }
           } else {
-            return element;
+            // No text filtering, use first element
+            element = elements[0];
+            if (elements.length > 1) {
+              console.log(`⚠️ Multiple elements found, using first one (consider adding text content for better targeting)`);
+            }
+          }
+
+          if (element) {
+            console.log(`✅ Element selected on attempt ${attempt}`);
+
+            // If waitForElement is true, also check if element is visible and interactable
+            if (waitForElement) {
+              const isVisible = await this.waitForElementToBeVisible(element);
+              if (isVisible) {
+                return element;
+              } else {
+                console.log(`⏳ Element found but not visible yet, waiting...`);
+              }
+            } else {
+              return element;
+            }
           }
         } else {
-          console.log(`❌ Element not found on attempt ${attempt}`);
-          // Skip alternative selector fallback to ensure precise element matching
+          console.log(`❌ No elements found with selector on attempt ${attempt}`);
         }
 
         // Wait before next attempt (except for last attempt)
@@ -1628,12 +1662,16 @@ class E2EContentScript {
     }
 
     console.log(`🔍 Step ${currentStep}: ${step.type} on "${step.selector}"`);
+    if (step.text && step.text.trim()) {
+      console.log(`🔍 Expected text: "${step.text}"`);
+    }
 
     // Use improved element finding with retries and waiting
     const element = await this.findElementWithRetry(step.selector, {
       maxAttempts: 5,
       waitBetweenAttempts: 1000,
-      waitForElement: true
+      waitForElement: true,
+      expectedText: step.text // Pass expected text for filtering
     });
 
     if (!element) {
@@ -1677,17 +1715,8 @@ class E2EContentScript {
     try {
       switch (step.type) {
         case 'click':
-          // Validate text content if recorded
-          if (step.text && step.text.trim()) {
-            const currentText = element.textContent?.trim() || '';
-            if (currentText !== step.text) {
-              const errorMsg = `Text content mismatch: expected "${step.text}", but got "${currentText}"`;
-              console.error(`❌ ${errorMsg}`);
-              this.showScreenshotIndicator(`❌ Step ${currentStep} failed: Text content changed`, 3000);
-              throw new Error(errorMsg);
-            }
-            console.log(`✅ Text content validated: "${currentText}"`);
-          }
+          // Text validation is now done in findElementWithRetry
+          console.log(`✅ Clicking element with text: "${element.textContent?.trim() || 'no text'}"`);
           element.click();
           break;
         case 'input':
