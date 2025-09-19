@@ -1,99 +1,73 @@
 class ScrollManager {
-  static getAllScrollableElements() {
-    const scrollableElements = [];
+  static saveScrollPositions() {
+    const savedScrollData = [];
 
-    // Always include window/document scroll position
-    scrollableElements.push({
-      element: 'window',
-      scrollLeft: window.pageXOffset || document.documentElement.scrollLeft || document.body.scrollLeft || 0,
-      scrollTop: window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0
-    });
-
-    // Find all scrollable elements in the DOM
-    const allElements = document.querySelectorAll('*');
-    allElements.forEach(element => {
-      const style = getComputedStyle(element);
-      const hasScrollableContent = (
-        element.scrollHeight > element.clientHeight ||
-        element.scrollWidth > element.clientWidth
-      );
-      const isScrollable = (
-        style.overflow === 'auto' ||
-        style.overflow === 'scroll' ||
-        style.overflowX === 'auto' ||
-        style.overflowX === 'scroll' ||
-        style.overflowY === 'auto' ||
-        style.overflowY === 'scroll'
-      );
-
-      if (hasScrollableContent && isScrollable && (element.scrollLeft > 0 || element.scrollTop > 0)) {
-        scrollableElements.push({
-          element: element,
-          scrollLeft: element.scrollLeft,
-          scrollTop: element.scrollTop,
-          selector: this.getElementSelector(element)
+    // 모든 스크롤 가능한 요소 찾아서 저장
+    document.querySelectorAll('*').forEach((el) => {
+      if (el.scrollTop > 0 || el.scrollHeight > el.clientHeight) {
+        savedScrollData.push({
+          element: el,
+          scrollTop: el.scrollTop,
+          scrollLeft: el.scrollLeft,
+          selector: this.getElementSelector(el)
         });
       }
     });
 
-    console.log(`📍 Found ${scrollableElements.length} scrollable elements with positions`);
-    return scrollableElements;
+    console.log('💾 Saved scroll positions:', savedScrollData);
+    return savedScrollData;
   }
 
-  static getElementSelector(element) {
-    if (element.id) {
-      return `#${element.id}`;
-    }
-    if (element.className) {
-      const classes = element.className.split(' ').filter(c => c.trim()).slice(0, 2);
-      if (classes.length > 0) {
-        return `${element.tagName.toLowerCase()}.${classes.join('.')}`;
-      }
-    }
-    return element.tagName.toLowerCase();
-  }
-
-  static saveScrollPositions() {
-    const positions = this.getAllScrollableElements();
-    console.log('💾 Saved scroll positions:', positions);
-    return positions;
-  }
-
-  static restoreScrollPositions(savedPositions) {
-    if (!savedPositions || !Array.isArray(savedPositions)) {
+  static restoreScrollPositions(savedScrollData) {
+    if (!savedScrollData || !Array.isArray(savedScrollData)) {
       console.warn('⚠️ No valid scroll positions to restore');
       return;
     }
 
-    console.log('🔄 Restoring scroll positions:', savedPositions);
+    console.log('🔄 Restoring scroll positions:', savedScrollData);
 
-    savedPositions.forEach(pos => {
+    savedScrollData.forEach(data => {
       try {
-        if (pos.element === 'window') {
-          // Restore window scroll position using multiple methods
-          window.scrollTo(pos.scrollLeft, pos.scrollTop);
-          document.documentElement.scrollLeft = pos.scrollLeft;
-          document.documentElement.scrollTop = pos.scrollTop;
-          document.body.scrollLeft = pos.scrollLeft;
-          document.body.scrollTop = pos.scrollTop;
-        } else if (pos.selector) {
-          // Try to find and restore element scroll position
-          const elements = document.querySelectorAll(pos.selector);
-          elements.forEach(element => {
-            if (element.scrollLeft !== undefined && element.scrollTop !== undefined) {
-              element.scrollLeft = pos.scrollLeft;
-              element.scrollTop = pos.scrollTop;
-            }
-          });
-        } else if (pos.element && pos.element.scrollLeft !== undefined) {
-          // Direct element reference (if still valid)
-          pos.element.scrollLeft = pos.scrollLeft;
-          pos.element.scrollTop = pos.scrollTop;
+        // 요소가 여전히 존재하는지 확인
+        if (data.element && data.element.isConnected) {
+          data.element.scrollTop = data.scrollTop;
+          data.element.scrollLeft = data.scrollLeft;
+        } else {
+          // selector로 다시 찾아서 복원
+          const element = document.querySelector(data.selector);
+          if (element) {
+            element.scrollTop = data.scrollTop;
+            element.scrollLeft = data.scrollLeft;
+          }
         }
-      } catch (error) {
-        console.warn('⚠️ Failed to restore scroll position for element:', pos, error);
+      } catch (e) {
+        console.warn('⚠️ Failed to restore scroll for element:', data, e);
       }
     });
+  }
+
+  // 요소 선택자 생성 (고유 식별을 위해)
+  static getElementSelector(element) {
+    if (element.id) return `#${element.id}`;
+    if (element.className) return `.${element.className.split(' ')[0]}`;
+
+    const path = [];
+    let currentElement = element;
+    while (currentElement.parentNode) {
+      let selector = currentElement.nodeName.toLowerCase();
+      if (currentElement.id) {
+        selector += `#${currentElement.id}`;
+        path.unshift(selector);
+        break;
+      } else {
+        const siblings = currentElement.parentNode.children;
+        const index = Array.from(siblings).indexOf(currentElement) + 1;
+        selector += `:nth-child(${index})`;
+      }
+      path.unshift(selector);
+      currentElement = currentElement.parentNode;
+    }
+    return path.join(' > ');
   }
 }
 
