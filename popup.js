@@ -12,6 +12,7 @@ class E2ETestRecorder {
     await this.loadTests();
     await this.loadRecordingState();
     await this.loadReplayState(); // Load replay state on popup open
+    await this.validateReplayState(); // Validate state with content script
     this.setupEventListeners();
     this.setupMessageListener();
     this.updateUI();
@@ -89,6 +90,38 @@ class E2ETestRecorder {
   async clearReplayState() {
     await chrome.storage.local.remove(['replayState']);
     console.log(`🗑️ Cleared replay state`);
+  }
+
+  async validateReplayState() {
+    // If we think a test is replaying, check with content script to verify
+    if (this.currentReplayingTest) {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab) {
+          const response = await chrome.tabs.sendMessage(tab.id, { action: 'ping' });
+
+          // If content script responds but no test is actually running, clear our state
+          if (response && response.success) {
+            // Send a status check message to verify actual replay state
+            const statusResponse = await chrome.tabs.sendMessage(tab.id, {
+              action: 'getReplayStatus',
+              executionId: this.currentReplayingTest.executionId
+            });
+
+            if (statusResponse && !statusResponse.isReplaying) {
+              console.log('🔄 Content script reports no test running, clearing stale replay state');
+              this.currentReplayingTest = null;
+              await this.clearReplayState();
+            }
+          }
+        }
+      } catch (error) {
+        // If we can't reach content script, assume test is no longer running
+        console.log('🔄 Could not verify replay state with content script, clearing stale state');
+        this.currentReplayingTest = null;
+        await this.clearReplayState();
+      }
+    }
   }
 
   async saveRecordingState() {
@@ -1014,6 +1047,16 @@ class E2ETestRecorder {
         return `Change: <code>${this.truncateSelector(step.selector)}</code> = "${this.escapeHtml(step.value || '')}"`;
       case 'screenshot':
         return `Screenshot checkpoint`;
+      case 'navigation':
+        if (step.action === 'start') {
+          return `🎬 Start test at: <code>${this.truncateUrl(step.toUrl || 'page')}</code>`;
+        } else if (step.action === 'leaving') {
+          return `🔗 Navigate away from: <code>${this.truncateUrl(step.fromUrl || 'current page')}</code>`;
+        } else if (step.action === 'arrived') {
+          return `🔗 Navigate to: <code>${this.truncateUrl(step.toUrl || 'page')}</code>`;
+        } else {
+          return `🔗 Navigate to: <code>${this.truncateUrl(step.toUrl || step.fromUrl || 'page')}</code>`;
+        }
       default:
         return `${step.type}: <code>${this.truncateSelector(step.selector || 'unknown')}</code>`;
     }
@@ -1023,6 +1066,12 @@ class E2ETestRecorder {
     if (!selector) return 'unknown';
     if (selector.length <= 50) return selector;
     return selector.substring(0, 47) + '...';
+  }
+
+  truncateUrl(url) {
+    if (!url) return 'unknown';
+    if (url.length <= 60) return url;
+    return url.substring(0, 57) + '...';
   }
 
   toggleSteps(index) {

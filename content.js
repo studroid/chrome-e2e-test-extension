@@ -82,6 +82,17 @@ class E2EContentScript {
           // Simple ping to verify content script is alive and responsive
           sendResponse({ success: true, message: 'Content script is ready' });
           break;
+        case 'getReplayStatus':
+          // Check current replay status
+          const isMatching = message.executionId ?
+            (this.currentExecutionId === message.executionId) : true;
+          sendResponse({
+            success: true,
+            isReplaying: this.isReplaying && isMatching,
+            currentExecutionId: this.currentExecutionId,
+            isTestInterrupted: this.isTestInterrupted
+          });
+          break;
         case 'forceReset':
           // Emergency force reset
           console.log('🚨 Received force reset command');
@@ -147,6 +158,15 @@ class E2EContentScript {
     this.overlay.style.background = '#dc2626';
 
     console.log(`📝 Started recording "${testName}" from URL: ${this.startUrl}`);
+
+    // Record the initial page as the first step
+    this.recordStep({
+      type: 'navigation',
+      action: 'start',
+      toUrl: this.startUrl,
+      timestamp: Date.now(),
+      isInitialStep: true
+    });
 
     this.setupRecordingListeners();
   }
@@ -235,6 +255,10 @@ class E2EContentScript {
     document.addEventListener('mouseover', this.handleMouseOver, true);
     document.addEventListener('mouseout', this.handleMouseOut, true);
     document.addEventListener('keydown', this.handleKeyDown, true);
+
+    // Navigation detection
+    window.addEventListener('beforeunload', this.handleBeforeUnload, true);
+    window.addEventListener('load', this.handlePageLoad, true);
   }
 
   removeRecordingListeners() {
@@ -244,6 +268,10 @@ class E2EContentScript {
     document.removeEventListener('mouseover', this.handleMouseOver, true);
     document.removeEventListener('mouseout', this.handleMouseOut, true);
     document.removeEventListener('keydown', this.handleKeyDown, true);
+
+    // Navigation cleanup
+    window.removeEventListener('beforeunload', this.handleBeforeUnload, true);
+    window.removeEventListener('load', this.handlePageLoad, true);
   }
 
   handleClick = async (event) => {
@@ -369,6 +397,33 @@ class E2EContentScript {
   handleMouseOut = (event) => {
     if (!this.isRecording) return;
     this.clearHighlight();
+  }
+
+  handleBeforeUnload = (event) => {
+    if (!this.isRecording) return;
+
+    // Record navigation step before page unloads
+    this.recordStep({
+      type: 'navigation',
+      action: 'leaving',
+      fromUrl: window.location.href,
+      timestamp: Date.now()
+    });
+
+    // Save recorded steps before navigation
+    this.saveRecordedSteps();
+  }
+
+  handlePageLoad = (event) => {
+    if (!this.isRecording) return;
+
+    // Record navigation step after page loads
+    this.recordStep({
+      type: 'navigation',
+      action: 'arrived',
+      toUrl: window.location.href,
+      timestamp: Date.now()
+    });
   }
 
   highlightElement(element) {
@@ -1391,19 +1446,31 @@ class E2EContentScript {
 
     console.log(`✅ Test "${testName}" completed successfully in ${duration}ms`);
 
-    // Notify popup about test completion
+    // Immediately reset replay state to prevent UI inconsistency
+    const completedExecutionId = this.currentExecutionId;
+    this.isReplaying = false;
+    this.isTestInterrupted = false;
+    this.currentExecutionId = null;
+
+    // Clear timeout if any
+    if (this.currentReplayTimeout) {
+      clearTimeout(this.currentReplayTimeout);
+      this.currentReplayTimeout = null;
+    }
+
+    // Notify popup about test completion with delay to ensure UI sees the success state
     try {
       chrome.runtime.sendMessage({
         action: 'testCompleted',
         testName: testName,
         duration: duration,
-        executionId: this.currentExecutionId
+        executionId: completedExecutionId
       });
     } catch (error) {
       console.warn('Failed to notify popup about test completion:', error);
     }
 
-    // Clean up immediately
+    // Clean up execution state
     await this.cleanupTestExecution();
   }
 
@@ -1438,8 +1505,18 @@ class E2EContentScript {
     console.error(`❌ Test "${testName}" failed:`, error);
     console.log(`🔄 Current isReplaying state before cleanup: ${this.isReplaying}`);
 
-    // IMMEDIATE cleanup on failure - FIRST PRIORITY
-    this.cleanupTestExecutionSync();
+    // Immediately reset replay state to prevent UI inconsistency
+    const failedExecutionId = this.currentExecutionId;
+    this.isReplaying = false;
+    this.isTestInterrupted = false;
+    this.currentExecutionId = null;
+
+    // Clear timeout if any
+    if (this.currentReplayTimeout) {
+      clearTimeout(this.currentReplayTimeout);
+      this.currentReplayTimeout = null;
+    }
+
     console.log(`✅ Current isReplaying state after cleanup: ${this.isReplaying}`);
 
     // Notify popup about test failure
@@ -1448,7 +1525,7 @@ class E2EContentScript {
         action: 'testFailed',
         testName: testName,
         error: error.message,
-        executionId: this.currentExecutionId
+        executionId: failedExecutionId
       });
     } catch (msgError) {
       console.warn('Failed to notify popup about test failure:', msgError);
@@ -1584,6 +1661,39 @@ class E2EContentScript {
       // Keep indicator visible briefly
       await this.delay(1000);
       return; // Skip element-based logic
+    }
+
+    // Handle navigation steps differently (no element interaction needed)
+    if (step.type === 'navigation') {
+      this.overlay.textContent = `Navigating: ${currentStep}/${totalSteps}`;
+
+      if (step.action === 'start') {
+        // Initial step - ensure we're at the starting URL
+        if (step.toUrl && step.toUrl !== window.location.href) {
+          console.log(`🎬 Starting test at: ${step.toUrl}`);
+          this.showScreenshotIndicator(`🎬 Starting test at ${step.toUrl}`, 2000);
+          window.location.href = step.toUrl;
+          return;
+        } else {
+          console.log(`✅ Already at starting URL: ${step.toUrl || 'current page'}`);
+          this.showScreenshotIndicator('🎬 Test starting at correct page', 1000);
+          await this.delay(1000);
+          return;
+        }
+      } else if (step.toUrl && step.toUrl !== window.location.href) {
+        console.log(`🔗 Navigating to: ${step.toUrl}`);
+        this.showScreenshotIndicator(`🔗 Navigating to ${step.toUrl}`, 2000);
+
+        // Navigate to the URL
+        window.location.href = step.toUrl;
+        // Navigation will interrupt execution - the test will continue after page load
+        return;
+      } else {
+        console.log(`✅ Already at target URL: ${step.toUrl || 'current page'}`);
+        this.showScreenshotIndicator('✅ Navigation step completed', 1000);
+        await this.delay(1000);
+        return;
+      }
     }
 
     console.log(`🔍 Step ${currentStep}: ${step.type} on "${step.selector}"`);
