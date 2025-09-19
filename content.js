@@ -1596,10 +1596,13 @@ class E2EContentScript {
           console.log('Starting screenshot capture for comparison...');
 
           // Restore scroll position if available
+          console.log('Screenshot step:', step); // 전체 step 객체 확인
           if (step.scrollPosition) {
             console.log(`📍 Restoring screenshot scroll position: x=${step.scrollPosition.x}, y=${step.scrollPosition.y}`);
             window.scrollTo(step.scrollPosition.x, step.scrollPosition.y);
             await this.delay(300); // Wait for scroll to complete
+          } else {
+            console.warn('⚠️ No scroll position found in screenshot step'); // 경고 추가
           }
 
           // Hide all indicators before taking screenshot to avoid interference

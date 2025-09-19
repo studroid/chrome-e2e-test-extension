@@ -333,7 +333,9 @@ class E2ETestRecorder {
       let scrollPosition = null;
       try {
         const scrollResponse = await this.sendMessageToActiveTab({ action: 'getCurrentScrollPosition' });
+        console.log('Scroll response:', scrollResponse); // 디버그 로그 추가
         scrollPosition = scrollResponse && scrollResponse.scrollPosition || null;
+        console.log('Saving scroll position:', scrollPosition); // 디버그 로그 추가
       } catch (error) {
         console.warn('Could not get scroll position:', error);
       }
@@ -347,6 +349,7 @@ class E2ETestRecorder {
         description: 'Visual checkpoint',
         scrollPosition: scrollPosition
       };
+      console.log('Screenshot step created:', screenshotStep); // 디버그 로그 추가
 
       // Add to current test steps
       this.currentTest.steps.push(screenshotStep);
