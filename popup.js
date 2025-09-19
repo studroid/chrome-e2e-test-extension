@@ -317,6 +317,17 @@ class E2ETestRecorder {
         throw new Error('Cannot capture screenshots of extension or system pages');
       }
 
+      // Get current scroll position from content script BEFORE capturing screenshot
+      let scrollPosition = null;
+      try {
+        const scrollResponse = await this.sendMessageToActiveTab({ action: 'getCurrentScrollPosition' });
+        console.log('Scroll response:', scrollResponse); // 디버그 로그 추가
+        scrollPosition = scrollResponse && scrollResponse.scrollPosition || null;
+        console.log('Saving scroll position:', scrollPosition); // 디버그 로그 추가
+      } catch (error) {
+        console.warn('Could not get scroll position:', error);
+      }
+
       // Capture screenshot directly using chrome.tabs API
       console.log('Attempting to capture visible tab...');
       const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
@@ -327,17 +338,6 @@ class E2ETestRecorder {
 
       if (!dataUrl) {
         throw new Error('No screenshot data received');
-      }
-
-      // Get current scroll position from content script
-      let scrollPosition = null;
-      try {
-        const scrollResponse = await this.sendMessageToActiveTab({ action: 'getCurrentScrollPosition' });
-        console.log('Scroll response:', scrollResponse); // 디버그 로그 추가
-        scrollPosition = scrollResponse && scrollResponse.scrollPosition || null;
-        console.log('Saving scroll position:', scrollPosition); // 디버그 로그 추가
-      } catch (error) {
-        console.warn('Could not get scroll position:', error);
       }
 
       // Add screenshot as a test step
