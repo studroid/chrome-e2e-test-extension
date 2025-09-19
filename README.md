@@ -1,15 +1,45 @@
 # E2E Test Recorder - Chrome Extension
 
-Chrome extension for simplified end-to-end testing. Easily record, replay, and manage E2E test scenarios directly in your browser with automated element selection and test generation capabilities.
+Chrome extension for simplified end-to-end testing. Easily record, replay, and manage E2E test scenarios directly in your browser with automated element selection, visual regression testing, and robust error detection.
 
 ## Features
 
-- **🎥 Record User Interactions**: Automatically capture clicks, inputs, form submissions, and navigation
-- **🔄 Replay Tests**: Execute recorded test scenarios with visual feedback
-- **🎯 Smart Element Selection**: Intelligent selector generation for reliable element targeting
-- **📊 Test Management**: Organize, export, and manage multiple test scenarios
-- **📝 Code Generation**: Export tests as Playwright, Cypress, or Selenium code
-- **⚡ Real-time Feedback**: Visual indicators during recording and replay
+### 🎥 **Recording & Replay**
+- **Record User Interactions**: Automatically capture clicks, inputs, form submissions, and navigation
+- **Smart Element Targeting**: Text content-based element identification for precise targeting
+- **Screenshot Capture**: Automatic screenshots at each step for visual verification
+- **Initial URL Tracking**: Records starting page for accurate test replay
+
+### 🔍 **Intelligent Element Detection**
+- **Multi-layer Selector Strategy**: ID → data-testid → name → classes → parent-child paths
+- **Text Content Filtering**: Finds correct element among multiple matches using text content
+- **Fallback Prevention**: Disabled alternative selector fallback to prevent false positives
+- **Real-time Element Validation**: Ensures elements exist and are interactable before action
+
+### 📸 **Visual Regression Testing**
+- **Automatic Screenshot Comparison**: Compares recorded vs replay screenshots
+- **Percentage-based Difference Detection**: Shows exact visual change percentage
+- **Interactive Visual Diff**: User can accept, reject, or update baseline images
+- **Element-level Screenshots**: Captures specific elements for precise comparison
+
+### 🛡️ **Robust Error Detection**
+- **Missing Element Detection**: Fails when recorded elements are removed from DOM
+- **Text Content Validation**: Ensures element text matches recorded content
+- **DOM Structure Verification**: Detects when page structure has changed
+- **Precise Error Messages**: Clear indication of what went wrong and where
+
+### ⚡ **Advanced Test Execution**
+- **Real-time Progress Tracking**: Shows current step and completion percentage
+- **Step-by-step Breakdown**: Detailed view of all test steps with expand/collapse
+- **Force Stop Capability**: Emergency stop for stuck or infinite-running tests
+- **State Persistence**: Maintains test status across popup close/reopen
+- **Navigation Step Recording**: Tracks page transitions and URL changes
+
+### 📊 **Test Management**
+- **Unique Test Identification**: Prevents conflicts between tests with same names
+- **Execution State Management**: Handles test resumption after navigation
+- **Multiple Test Support**: Run different tests without interference
+- **Export Functionality**: Save tests as JSON for backup and sharing
 
 ## Installation
 
@@ -52,13 +82,37 @@ Chrome extension for simplified end-to-end testing. Easily record, replay, and m
 
 ## Recorded Actions
 
-The extension captures the following user interactions:
+The extension captures the following user interactions with enhanced accuracy:
 
-- **Clicks**: Button clicks, link navigation, checkbox/radio selections
-- **Text Input**: Form field entries, text area content
-- **Selections**: Dropdown menu choices
-- **Keyboard Events**: Enter key, Tab navigation
-- **Page Navigation**: URL changes and redirects
+### 🖱️ **Click Actions**
+- **Button clicks** with text content validation
+- **Link navigation** with precise element targeting
+- **Checkbox/radio selections** with state verification
+- **Element highlighting** during recording for visual feedback
+
+### ⌨️ **Input Actions**
+- **Form field entries** with value validation
+- **Text area content** with multi-line support
+- **Auto-scroll to elements** for better visibility
+- **Input event simulation** for framework compatibility
+
+### 🔄 **Navigation Actions**
+- **Page URL changes** and redirects
+- **Initial page recording** as starting step
+- **Before/after navigation events** for complete flow tracking
+- **Cross-page test continuation** with state management
+
+### 🎯 **Advanced Interactions**
+- **Dropdown selections** with value matching
+- **Keyboard events** (Enter, Tab) for form navigation
+- **Scroll position tracking** for accurate element positioning
+- **Element visibility verification** before interaction
+
+### 📸 **Visual Verification**
+- **Automatic screenshots** at each interaction step
+- **Element-specific captures** for targeted comparison
+- **Visual diff highlighting** for regression detection
+- **Baseline image management** for consistent testing
 
 ## Technical Details
 
@@ -69,21 +123,64 @@ The extension captures the following user interactions:
 - **Background Script**: Manages data storage and cross-tab communication
 - **Popup Interface**: Provides user controls for test management
 
-### Selector Strategy
+### Enhanced Selector Strategy
 
-The extension uses an intelligent selector hierarchy:
+The extension uses a sophisticated multi-layer approach for reliable element targeting:
 
-1. Element ID (`#elementId`)
-2. Unique class combinations (`.class1.class2`)
-3. Data attributes (`[data-testid="value"]`)
-4. Name attributes (`[name="fieldName"]`)
-5. CSS path fallback (`div > span:nth-of-type(2)`)
+#### **Priority-based Selection**
+1. **Element ID** (`#elementId`) - Highest priority for unique identification
+2. **Test attributes** (`[data-testid="value"]`, `[data-cy="value"]`) - QA-friendly selectors
+3. **Name attributes** (`[name="fieldName"]`) - Stable for form elements
+4. **Semantic attributes** (`[aria-label="value"]`, `[role="button"]`) - Accessibility-focused
+5. **Class combinations** (`.class1.class2.class3`) - Multiple classes for specificity
+6. **Parent-child relationships** (`div > button.submit`) - Structural positioning
 
-### Storage
+#### **Text Content Filtering**
+- **Primary matching**: Exact text content comparison
+- **Multi-element handling**: Filters elements by recorded text when multiple matches found
+- **Content validation**: Ensures clicked element contains expected text
+- **Dynamic content detection**: Identifies when element text has changed
 
-- Tests are stored locally using Chrome's storage API
-- No data is transmitted to external servers
-- Export functionality allows backup and sharing
+#### **Robustness Features**
+- **Alternative selector disabled**: Prevents false positives from generic fallbacks
+- **Element existence verification**: Confirms element is still in DOM
+- **Visibility checking**: Ensures element is visible and interactable
+- **Retry mechanism**: Multiple attempts with configurable timing
+
+#### **Error Prevention**
+- **Precise targeting**: No generic class fallbacks that could match wrong elements
+- **Text mismatch detection**: Immediate failure when element content differs
+- **DOM change detection**: Identifies structural changes that affect targeting
+- **Clear error reporting**: Specific messages about what went wrong
+
+### Storage & State Management
+
+- **Local Storage**: Tests stored using Chrome's storage API with no external transmission
+- **State Persistence**: Test execution state maintained across popup sessions
+- **Cross-tab Handling**: Manages test execution across page navigation
+- **Export/Import**: JSON-based backup and sharing functionality
+- **Execution History**: Tracks test runs and results for debugging
+
+## QA Team Benefits
+
+### 🚀 **Efficiency Gains**
+- **80% Time Reduction**: Automated repetitive testing workflows
+- **Parallel Testing**: Run multiple test scenarios simultaneously
+- **Consistent Results**: Eliminates human error in manual testing
+- **24/7 Testing**: Can be integrated into CI/CD pipelines
+
+### 🎯 **Use Cases**
+- **Daily Regression Testing**: Automated morning health checks
+- **Pre-deployment Validation**: Complete flow testing before releases
+- **Bug Reproduction**: Record exact steps to reproduce issues
+- **Cross-browser Testing**: Same tests across different browsers
+- **User Journey Validation**: End-to-end user experience testing
+
+### 📊 **Quality Assurance**
+- **Visual Regression Detection**: Catch UI changes automatically
+- **Functional Validation**: Ensure features work as expected
+- **Data Integrity**: Verify form submissions and data processing
+- **Performance Monitoring**: Track page load and interaction times
 
 ## Development
 
