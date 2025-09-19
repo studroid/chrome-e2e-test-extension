@@ -737,13 +737,7 @@ class E2EContentScript {
           }
         } else {
           console.log(`❌ Element not found on attempt ${attempt}`);
-
-          // Try alternative selectors if available
-          const alternativeElement = await this.tryAlternativeSelectors(selector);
-          if (alternativeElement) {
-            console.log(`✅ Element found using alternative selector`);
-            return alternativeElement;
-          }
+          // Skip alternative selector fallback to ensure precise element matching
         }
 
         // Wait before next attempt (except for last attempt)
