@@ -779,57 +779,6 @@ class E2EContentScript {
     return false;
   }
 
-  async tryAlternativeSelectors(originalSelector) {
-    // Try to generate alternative selectors based on the original
-    const alternatives = [];
-
-    try {
-      // If it's a complex selector, try simpler versions
-      if (originalSelector.includes(' > ')) {
-        const parts = originalSelector.split(' > ');
-        // Try just the last part
-        alternatives.push(parts[parts.length - 1]);
-        // Try without nth-child/nth-of-type
-        alternatives.push(parts[parts.length - 1].replace(/:nth-(child|of-type)\(\d+\)/, ''));
-      }
-
-      // If it contains nth-child/nth-of-type, try without it
-      if (originalSelector.includes(':nth-')) {
-        alternatives.push(originalSelector.replace(/:nth-(child|of-type)\(\d+\)/g, ''));
-      }
-
-      // If it's a class selector, try individual classes
-      if (originalSelector.startsWith('.') && originalSelector.includes('.') > 1) {
-        const classes = originalSelector.substring(1).split('.');
-        classes.forEach(cls => {
-          alternatives.push(`.${cls}`);
-        });
-      }
-
-      // Try each alternative
-      for (const altSelector of alternatives) {
-        if (this.isValidSelector(altSelector)) {
-          const elements = document.querySelectorAll(altSelector);
-          if (elements.length === 1) {
-            console.log(`🔄 Found element using alternative selector: "${altSelector}"`);
-            return elements[0];
-          } else if (elements.length > 1) {
-            console.log(`🔄 Multiple elements found for alternative selector: "${altSelector}" (${elements.length})`);
-            // Return first visible element
-            for (const el of elements) {
-              if (await this.waitForElementToBeVisible(el, 100)) {
-                return el;
-              }
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error trying alternative selectors:', error);
-    }
-
-    return null;
-  }
 
   async debugSelector(selector) {
     console.log('🔍 Debugging selector:', selector);
