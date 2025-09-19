@@ -5,6 +5,7 @@ class E2ETestRecorder {
     this.currentReplayingTest = null; // Track currently replaying test
     this.tests = [];
     this.expandedTests = new Set(); // Track which tests have expanded step lists
+    this.forceStopFailed = false; // Track if force stop has failed
     this.init();
   }
 
@@ -29,6 +30,7 @@ class E2ETestRecorder {
              this.currentReplayingTest.executionId === message.executionId :
              this.currentReplayingTest.name === message.testName)) {
           this.currentReplayingTest = null;
+          this.forceStopFailed = false; // Reset flag on normal completion
           await this.clearReplayState(); // Clear from storage
           this.updateUI();
         }
@@ -687,6 +689,9 @@ class E2ETestRecorder {
 
       this.showNotification('Starting test replay...', 'info');
 
+      // Reset force stop failed flag for new replay
+      this.forceStopFailed = false;
+
       // Set current replaying test with unique execution ID
       this.currentReplayingTest = {
         ...test,
@@ -914,8 +919,10 @@ class E2ETestRecorder {
       forceStopButton.style.display = 'none';
     }
 
-    // Show emergency reset button when recording or replaying
-    if (this.isRecording || this.currentReplayingTest) {
+    // Show emergency reset button based on context:
+    // - Always show during recording (since there's no Force Stop for recording)
+    // - Show during replay only if Force Stop has failed
+    if (this.isRecording || (this.currentReplayingTest && this.forceStopFailed)) {
       forceResetButton.style.display = 'block';
     } else {
       forceResetButton.style.display = 'none';
@@ -1191,6 +1198,9 @@ class E2ETestRecorder {
 
     } catch (error) {
       console.error('Failed to force stop test:', error);
+      this.forceStopFailed = true; // Mark that force stop failed
+      this.updateUI(); // Update UI to show emergency reset option
+      this.showNotification('Force stop failed - Emergency Reset now available', 'error');
       // If messaging fails, fall back to force reset
       await this.forceResetTestState();
     }
@@ -1237,6 +1247,7 @@ class E2ETestRecorder {
       console.warn('Could not clear background state:', error);
     }
 
+    this.forceStopFailed = false; // Reset the flag
     this.updateUI();
     this.showNotification('Emergency reset completed - all states cleared', 'success');
   }
