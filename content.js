@@ -1662,7 +1662,7 @@ class E2EContentScript {
       }
 
       // Show visual diff if there's a significant difference
-      if (visualDiff && visualDiff.differencePercentage > 5) {
+      if (visualDiff && visualDiff.differencePercentage > 0.1) {
         this.showScreenshotIndicator(`⚠️ Visual difference detected: ${visualDiff.differencePercentage.toFixed(2)}%`);
         const userChoice = await this.showVisualDiff(visualDiff, step, currentStep);
         if (userChoice === 'stop') {
