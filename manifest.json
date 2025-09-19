@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "E2E Test Recorder",
   "version": "1.0.0",
-  "description": "Chrome extension for simplified end-to-end testing. Easily record, replay, and manage E2E test scenarios directly in your browser with automated element selection and test generation capabilities.",
+  "description": "Advanced E2E testing with visual regression detection. Record, replay & validate web interactions with smart element targeting, screenshot comparison, and robust error detection for reliable QA automation.",
   "permissions": [
     "activeTab",
     "storage",
