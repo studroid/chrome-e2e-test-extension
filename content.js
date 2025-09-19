@@ -1838,25 +1838,14 @@ class E2EContentScript {
 
   async scrollToElementAndWait(element) {
     return new Promise((resolve) => {
-      const rect = element.getBoundingClientRect();
-      const isInViewport = (
-        rect.top >= 0 &&
-        rect.left >= 0 &&
-        rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
-        rect.right <= (window.innerWidth || document.documentElement.clientWidth)
-      );
-
-      if (isInViewport) {
-        // Element is already visible, no need to scroll
-        resolve();
-        return;
-      }
+      // 항상 요소를 정확한 위치로 스크롤 (뷰포트에 보여도 무조건 스크롤)
+      console.log('📍 Scrolling element to center position...');
 
       // Store initial scroll position
       const initialScrollY = window.scrollY;
       const initialScrollX = window.scrollX;
 
-      // Start scrolling
+      // 무조건 center로 스크롤
       element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
 
       // Wait for scroll to complete
@@ -1878,6 +1867,7 @@ class E2EContentScript {
 
             if (isNowVisible || Math.abs(initialScrollY - window.scrollY) > 0 || Math.abs(initialScrollX - window.scrollX) > 0) {
               // Element is visible or we've scrolled (even if not perfectly visible)
+              console.log('✅ Scroll completed to exact position');
               resolve();
             } else {
               // Try again
