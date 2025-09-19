@@ -798,8 +798,66 @@ class E2EContentScript {
     }
 
     console.error(`❌ Element not found after ${maxAttempts} attempts: "${selector}"`);
+
+    // If original selector failed and contains nth-child, try alternative strategies
+    if (selector.includes(':nth-child(')) {
+      console.log(`🔄 Selector contains nth-child, trying alternative strategies...`);
+
+      // Try removing nth-child and use text matching instead
+      const alternativeSelector = selector.replace(/:nth-child\(\d+\)/g, '');
+      if (alternativeSelector !== selector && expectedText) {
+        console.log(`🔄 Trying without nth-child: "${alternativeSelector}" with text: "${expectedText}"`);
+
+        try {
+          const elements = document.querySelectorAll(alternativeSelector);
+          for (const el of elements) {
+            const elementText = el.textContent?.trim() || '';
+            if (elementText === expectedText) {
+              console.log(`✅ Found element using text matching after removing nth-child`);
+              return el;
+            }
+          }
+        } catch (error) {
+          console.warn(`❌ Alternative selector also failed:`, error);
+        }
+      }
+
+      // Try even more simplified selector (remove specific positioning)
+      const simplifiedSelector = this.simplifySelector(selector);
+      if (simplifiedSelector !== selector && simplifiedSelector !== alternativeSelector) {
+        console.log(`🔄 Trying simplified selector: "${simplifiedSelector}"`);
+
+        try {
+          const elements = document.querySelectorAll(simplifiedSelector);
+          if (expectedText) {
+            for (const el of elements) {
+              const elementText = el.textContent?.trim() || '';
+              if (elementText === expectedText) {
+                console.log(`✅ Found element using simplified selector with text matching`);
+                return el;
+              }
+            }
+          } else if (elements.length === 1) {
+            console.log(`✅ Found unique element using simplified selector`);
+            return elements[0];
+          }
+        } catch (error) {
+          console.warn(`❌ Simplified selector also failed:`, error);
+        }
+      }
+    }
+
     await this.debugSelector(selector);
     return null;
+  }
+
+  // Helper function to simplify selector by removing specific positioning
+  simplifySelector(selector) {
+    return selector
+      .replace(/:nth-child\(\d+\)/g, '') // Remove nth-child
+      .replace(/\s*>\s*/g, ' ') // Change child selector to descendant
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .trim();
   }
 
   async waitForElementToBeVisible(element, timeout = 5000) {
@@ -892,18 +950,68 @@ class E2EContentScript {
         }
       }
 
-      // Only use nth-child for very specific cases and avoid high numbers
-      let sibling = current;
-      let nth = 1;
-      while (sibling = sibling.previousElementSibling) {
-        if (sibling.nodeName.toLowerCase() === current.nodeName.toLowerCase()) {
-          nth++;
+      // Try text-based or attribute-based selection before nth-child
+      let needsPositioning = false;
+
+      // Check if element has distinguishing text content (short and meaningful)
+      const textContent = current.textContent?.trim();
+      if (textContent && textContent.length > 0 && textContent.length < 50) {
+        // Check if text is unique among siblings
+        const siblings = Array.from(current.parentNode.children).filter(
+          child => child.nodeName.toLowerCase() === current.nodeName.toLowerCase()
+        );
+        const matchingTextSiblings = siblings.filter(
+          sibling => sibling.textContent?.trim() === textContent
+        );
+
+        if (matchingTextSiblings.length === 1) {
+          // Text is unique, we'll skip nth-child for now
+          // The custom text matching will be handled in findElementWithRetry
+          needsPositioning = false;
+        } else {
+          needsPositioning = true;
         }
+      } else {
+        // Check for distinguishing attributes
+        const distinguishingAttrs = ['title', 'alt', 'value', 'placeholder', 'href'];
+        let foundUniqueAttr = false;
+
+        for (const attr of distinguishingAttrs) {
+          const attrValue = current.getAttribute(attr);
+          if (attrValue) {
+            // Check if attribute value is unique among siblings
+            const siblings = Array.from(current.parentNode.children).filter(
+              child => child.nodeName.toLowerCase() === current.nodeName.toLowerCase()
+            );
+            const matchingAttrSiblings = siblings.filter(
+              sibling => sibling.getAttribute(attr) === attrValue
+            );
+
+            if (matchingAttrSiblings.length === 1) {
+              selector += `[${attr}="${attrValue}"]`;
+              foundUniqueAttr = true;
+              break;
+            }
+          }
+        }
+
+        needsPositioning = !foundUniqueAttr;
       }
 
-      // Only add nth-child if it's a reasonable number and would be stable
-      if (nth > 1 && nth <= 10) {
-        selector += `:nth-child(${nth})`;
+      // Only use nth-child as last resort and for reasonable numbers
+      if (needsPositioning) {
+        let sibling = current;
+        let nth = 1;
+        while (sibling = sibling.previousElementSibling) {
+          if (sibling.nodeName.toLowerCase() === current.nodeName.toLowerCase()) {
+            nth++;
+          }
+        }
+
+        // Only add nth-child if it's a reasonable number and would be stable
+        if (nth > 1 && nth <= 5) { // Reduced threshold from 10 to 5 for better stability
+          selector += `:nth-child(${nth})`;
+        }
       }
 
       path.unshift(selector);
