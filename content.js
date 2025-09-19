@@ -1195,19 +1195,7 @@ class E2EContentScript {
     const startTime = Date.now();
 
     try {
-      // Navigate to start URL if available and different from current URL
-      if (test.startUrl && test.startUrl !== window.location.href) {
-        console.log(`🔗 Navigating to start URL: ${test.startUrl}`);
-        this.overlay.textContent = `Navigating to start URL...`;
-
-        // Save test execution state before navigation
-        await this.saveTestExecutionState(test, 0, startTime);
-
-        window.location.href = test.startUrl;
-        // Navigation will interrupt execution here - state will be managed by background script
-        return;
-      }
-      // Execute test steps from the beginning
+      // Execute test steps from the beginning - navigation steps will handle URL navigation
       await this.executeTestSteps(test, 0, startTime);
 
     } catch (error) {
