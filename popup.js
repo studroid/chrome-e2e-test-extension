@@ -1198,6 +1198,11 @@ class E2ETestRecorder {
 
   // Emergency force reset for both recording and replay
   async forceReset() {
+    // Confirm before proceeding with emergency reset
+    if (!confirm('🚨 Emergency Reset will clear ALL recording/replay states and data.\n\nThis action cannot be undone. Continue?')) {
+      return;
+    }
+
     console.log('🚨 Emergency force reset - clearing all states...');
 
     try {
