@@ -1816,7 +1816,7 @@ class E2EContentScript {
     }
 
     // Show visual diff if there's a significant difference
-    if (visualDiff && visualDiff.differencePercentage > 5) {
+    if (visualDiff && visualDiff.differencePercentage > 0.1) {
       const userChoice = await this.showVisualDiff(visualDiff, step, currentStep);
       if (userChoice === 'stop') {
         throw new Error(`Visual regression test failed at step ${currentStep}`);
