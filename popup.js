@@ -329,13 +329,23 @@ class E2ETestRecorder {
         throw new Error('No screenshot data received');
       }
 
+      // Get current scroll position from content script
+      let scrollPosition = null;
+      try {
+        const scrollResponse = await this.sendMessageToActiveTab({ action: 'getCurrentScrollPosition' });
+        scrollPosition = scrollResponse && scrollResponse.scrollPosition || null;
+      } catch (error) {
+        console.warn('Could not get scroll position:', error);
+      }
+
       // Add screenshot as a test step
       const screenshotStep = {
         type: 'screenshot',
         timestamp: Date.now(),
         url: tab.url,
         screenshot: dataUrl,
-        description: 'Visual checkpoint'
+        description: 'Visual checkpoint',
+        scrollPosition: scrollPosition
       };
 
       // Add to current test steps

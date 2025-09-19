@@ -122,6 +122,15 @@ class E2EContentScript {
             .then(screenshot => sendResponse({ screenshot }))
             .catch(error => sendResponse({ error: error.message }));
           return true; // Keep message channel open for async response
+        case 'getCurrentScrollPosition':
+          sendResponse({
+            success: true,
+            scrollPosition: {
+              x: window.scrollX,
+              y: window.scrollY
+            }
+          });
+          break;
       }
       sendResponse({ success: true });
     });
@@ -1082,11 +1091,18 @@ class E2EContentScript {
     });
   }
 
-  async captureElementScreenshot(element) {
+  async captureElementScreenshot(element, scrollPosition = null) {
     try {
-      // Scroll element into view
-      element.scrollIntoView({ behavior: 'auto', block: 'center' });
-      await this.delay(100);
+      if (scrollPosition) {
+        // Use saved scroll position for exact positioning
+        console.log(`📍 Restoring scroll position: x=${scrollPosition.x}, y=${scrollPosition.y}`);
+        window.scrollTo(scrollPosition.x, scrollPosition.y);
+        await this.delay(300); // Wait longer for scroll to complete
+      } else {
+        // Fallback to original behavior
+        element.scrollIntoView({ behavior: 'auto', block: 'center' });
+        await this.delay(100);
+      }
 
       // Hide all indicators before taking screenshot to avoid interference
       this.hideAllIndicators();
@@ -1579,6 +1595,13 @@ class E2EContentScript {
         try {
           console.log('Starting screenshot capture for comparison...');
 
+          // Restore scroll position if available
+          if (step.scrollPosition) {
+            console.log(`📍 Restoring screenshot scroll position: x=${step.scrollPosition.x}, y=${step.scrollPosition.y}`);
+            window.scrollTo(step.scrollPosition.x, step.scrollPosition.y);
+            await this.delay(300); // Wait for scroll to complete
+          }
+
           // Hide all indicators before taking screenshot to avoid interference
           this.hideAllIndicators();
           await this.delay(200); // Brief delay to ensure indicators are hidden
@@ -1697,7 +1720,20 @@ class E2EContentScript {
     if (step.screenshot) {
       try {
         console.log('Capturing element screenshot for comparison...');
-        const currentScreenshot = await this.captureElementScreenshot(element);
+
+        // Get appropriate scroll position based on step type
+        let scrollPosition = null;
+        if (step.scrollPosition) {
+          if (step.type === 'click' && step.scrollPosition.after) {
+            // Use scroll position after the click action was recorded
+            scrollPosition = step.scrollPosition.after;
+          } else if (step.scrollPosition.x !== undefined && step.scrollPosition.y !== undefined) {
+            // Use simple scroll position for input/change steps
+            scrollPosition = step.scrollPosition;
+          }
+        }
+
+        const currentScreenshot = await this.captureElementScreenshot(element, scrollPosition);
         if (currentScreenshot) {
           console.log('Element screenshot captured, comparing...');
           visualDiff = await this.compareScreenshots(step.screenshot, currentScreenshot);
