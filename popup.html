@@ -105,6 +105,15 @@
       background: #4b5563;
     }
 
+    .btn-warning {
+      background: #f59e0b;
+      color: white;
+    }
+
+    .btn-warning:hover {
+      background: #d97706;
+    }
+
     button:disabled {
       opacity: 0.5;
       cursor: not-allowed;
@@ -463,6 +472,7 @@
     <button id="startRecording" class="btn-primary">Start Recording</button>
     <button id="stopRecording" class="btn-danger" disabled>Stop Recording</button>
     <button id="forceStopTest" class="btn-danger" style="display: none;">🛑 Force Stop Test</button>
+    <button id="forceReset" class="btn-warning" style="display: none;">🔄 Emergency Reset</button>
     <button id="importTests" class="btn-secondary">Import Tests</button>
     <button id="exportAllTests" class="btn-secondary">Export All</button>
     <button id="clearTests" class="btn-secondary">Clear All Tests</button>

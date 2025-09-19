@@ -1326,9 +1326,17 @@ class E2EContentScript {
   }
 
   forceResetReplayState() {
-    console.log('🔄 Force resetting replay state');
-    console.log(`  Before reset - isReplaying: ${this.isReplaying}`);
+    console.log('🔄 Force resetting all states (recording + replay)');
+    console.log(`  Before reset - isRecording: ${this.isRecording}, isReplaying: ${this.isReplaying}`);
 
+    // Reset recording state
+    this.isRecording = false;
+    this.currentTestName = null;
+    this.recordedSteps = [];
+    this.removeRecordingListeners();
+    this.clearHighlight();
+
+    // Reset replay state
     this.isReplaying = false;
     this.isTestInterrupted = false; // Clear interruption flag
     this.currentExecutionId = null; // Clear execution ID
@@ -1349,7 +1357,7 @@ class E2EContentScript {
       console.warn('Failed to clear execution state during force reset:', error);
     }
 
-    console.log(`  After reset - isReplaying: ${this.isReplaying}`);
+    console.log(`  After reset - isRecording: ${this.isRecording}, isReplaying: ${this.isReplaying}`);
     console.log('✅ Force reset completed - you can now start a new test');
   }
 

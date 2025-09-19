@@ -142,6 +142,7 @@ class E2ETestRecorder {
     document.getElementById('startRecording').addEventListener('click', () => this.startRecording());
     document.getElementById('stopRecording').addEventListener('click', () => this.stopRecording());
     document.getElementById('forceStopTest').addEventListener('click', () => this.forceStopTest());
+    document.getElementById('forceReset').addEventListener('click', () => this.forceReset());
     document.getElementById('captureScreenshot').addEventListener('click', () => this.captureScreenshot());
     document.getElementById('importTests').addEventListener('click', () => this.importTests());
     document.getElementById('exportAllTests').addEventListener('click', () => this.exportAllTests());
@@ -422,6 +423,21 @@ class E2ETestRecorder {
     if (!this.isRecording || !this.currentTest) return;
 
     try {
+      // Try to stop content script recording FIRST before changing popup state
+      try {
+        await this.sendMessageToActiveTab({ action: 'stopRecording' });
+        console.log('Successfully sent stop recording message to content script');
+      } catch (error) {
+        console.error('Failed to send stop recording message to content script:', error);
+        // Force clear content script state even if message fails
+        try {
+          await this.sendMessageToActiveTab({ action: 'forceReset' });
+          console.log('Sent force reset to content script');
+        } catch (resetError) {
+          console.error('Failed to send force reset:', resetError);
+        }
+      }
+
       this.isRecording = false;
 
       // Restore original browser size
@@ -441,8 +457,6 @@ class E2ETestRecorder {
         }
         this.originalWindowSize = null;
       }
-
-      await this.sendMessageToActiveTab({ action: 'stopRecording' });
 
       const result = await chrome.storage.local.get([`recording_${this.currentTest.name}`]);
       const contentScriptData = result[`recording_${this.currentTest.name}`];
@@ -484,7 +498,27 @@ class E2ETestRecorder {
 
     } catch (error) {
       console.error('Error stopping recording:', error);
-      this.showNotification('Error stopping recording', 'error');
+      this.showNotification('Error stopping recording - forcing state reset', 'error');
+
+      // Force clear all recording state even if there were errors
+      const testNameForCleanup = this.currentTest ? this.currentTest.name : null;
+
+      this.isRecording = false;
+      this.currentTest = null;
+      this.originalWindowSize = null;
+
+      // Clear recording state from storage
+      try {
+        await chrome.storage.local.remove(['recordingState']);
+        if (testNameForCleanup) {
+          await chrome.storage.local.remove([`recording_${testNameForCleanup}`]);
+        }
+        console.log('Forced cleanup of recording state from storage');
+      } catch (storageError) {
+        console.error('Failed to clear storage state:', storageError);
+      }
+
+      this.updateUI();
     }
   }
 
@@ -866,6 +900,7 @@ class E2ETestRecorder {
     const startButton = document.getElementById('startRecording');
     const stopButton = document.getElementById('stopRecording');
     const forceStopButton = document.getElementById('forceStopTest');
+    const forceResetButton = document.getElementById('forceReset');
     const screenshotButton = document.getElementById('captureScreenshot');
     const testListElement = document.getElementById('testList');
     const testNameInput = document.getElementById('testName');
@@ -877,6 +912,13 @@ class E2ETestRecorder {
       statusElement.className = 'status replaying';
     } else {
       forceStopButton.style.display = 'none';
+    }
+
+    // Show emergency reset button when recording or replaying
+    if (this.isRecording || this.currentReplayingTest) {
+      forceResetButton.style.display = 'block';
+    } else {
+      forceResetButton.style.display = 'none';
     }
 
     if (this.isRecording && this.currentTest) {
@@ -1152,6 +1194,46 @@ class E2ETestRecorder {
       // If messaging fails, fall back to force reset
       await this.forceResetTestState();
     }
+  }
+
+  // Emergency force reset for both recording and replay
+  async forceReset() {
+    console.log('🚨 Emergency force reset - clearing all states...');
+
+    try {
+      // Send force reset to content script
+      await this.sendMessageToActiveTab({
+        action: 'forceReset'
+      });
+    } catch (error) {
+      console.warn('Could not send force reset to content script:', error);
+    }
+
+    // Force clear all local states
+    this.isRecording = false;
+    this.currentTest = null;
+    this.currentReplayingTest = null;
+    this.originalWindowSize = null;
+
+    // Clear all storage states
+    try {
+      await chrome.storage.local.clear();
+      console.log('All storage cleared');
+    } catch (error) {
+      console.error('Failed to clear storage:', error);
+    }
+
+    // Clear background script state
+    try {
+      await chrome.runtime.sendMessage({
+        action: 'clearTestExecutionState'
+      });
+    } catch (error) {
+      console.warn('Could not clear background state:', error);
+    }
+
+    this.updateUI();
+    this.showNotification('Emergency reset completed - all states cleared', 'success');
   }
 
   // Emergency force reset function
